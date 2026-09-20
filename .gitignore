@@ -1,0 +1,6 @@
+.env
+.secret_key
+inventario.db
+inventario.db-wal
+inventario.db-shm
+__pycache__/
