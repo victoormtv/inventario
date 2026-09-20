@@ -13,7 +13,6 @@ import { PageHeader, Panel, PanelHead } from '../components/ui/Panel';
 import Pagination from '../components/ui/Pagination';
 import SearchInput from '../components/ui/SearchInput';
 import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
-import { useToast } from '../components/ui/Toast';
 import { FaArrowRight } from 'react-icons/fa';
 
 // ─── colores por tipo ───
@@ -186,7 +185,6 @@ function MovimientoModal({ onGuardado, onCerrar }: { onGuardado: (r: ResultadoMo
 
 // ─── página ───
 export default function KardexPage() {
-    const toast = useToast();
     const [q, setQ] = useState('');
     const [tipo, setTipo] = useState('');
     const [desde, setDesde] = useState('');
