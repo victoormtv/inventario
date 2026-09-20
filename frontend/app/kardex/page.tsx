@@ -15,11 +15,9 @@ import SearchInput from '../components/ui/SearchInput';
 import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
 import { FaArrowRight } from 'react-icons/fa';
 
-// ─── colores por tipo ───
 const TONO = { ENTRADA: 'ok', SALIDA: 'danger', AJUSTE: 'brand' } as const;
 const TEXTO = { ENTRADA: 'Entrada', SALIDA: 'Salida', AJUSTE: 'Ajuste' } as const;
 
-// ─── modal de resultado tras registrar ───
 function ResultadoModal({ r, onCerrar }: { r: ResultadoMovimiento; onCerrar: () => void }) {
     const bajoCruce = r.total_antes > r.stock_minimo && r.total_despues <= r.stock_minimo;
     const agotado = r.total_despues <= 0;
@@ -59,7 +57,6 @@ function ResultadoModal({ r, onCerrar }: { r: ResultadoMovimiento; onCerrar: () 
     );
 }
 
-// ─── modal de nuevo movimiento ───
 function MovimientoModal({ onGuardado, onCerrar }: { onGuardado: (r: ResultadoMovimiento) => void; onCerrar: () => void }) {
     const [tipo, setTipo] = useState<'ENTRADA' | 'SALIDA' | 'AJUSTE'>('ENTRADA');
     const [q, setQ] = useState('');
@@ -98,7 +95,6 @@ function MovimientoModal({ onGuardado, onCerrar }: { onGuardado: (r: ResultadoMo
             <form className="form" onSubmit={registrar}>
                 {error && <Callout tono="danger">{error}</Callout>}
 
-                {/* Tipo */}
                 <Field label="Tipo de movimiento">
                     <div className="segmented">
                         {(['ENTRADA', 'SALIDA', 'AJUSTE'] as const).map(t => (
@@ -110,7 +106,6 @@ function MovimientoModal({ onGuardado, onCerrar }: { onGuardado: (r: ResultadoMo
                     </div>
                 </Field>
 
-                {/* Buscar producto */}
                 <Field label="Producto" hint={skuSel ? undefined : 'Escribe al menos una letra para buscar.'}>
                     {skuSel ? (
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -139,7 +134,6 @@ function MovimientoModal({ onGuardado, onCerrar }: { onGuardado: (r: ResultadoMo
                     )}
                 </Field>
 
-                {/* Variante */}
                 {detalle.data && (
                     <Field label="Variante" hint="Selecciona la talla y color exactos.">
                         {detalle.data.variantes.length === 0 ? (
@@ -159,7 +153,6 @@ function MovimientoModal({ onGuardado, onCerrar }: { onGuardado: (r: ResultadoMo
                     </Field>
                 )}
 
-                {/* Cantidad y referencia */}
                 <div className="field-row">
                     <Field label={tipo === 'AJUSTE' ? 'Stock real contado' : 'Cantidad'} hint={tipo === 'AJUSTE' ? 'El sistema calcula la diferencia.' : undefined}>
                         <input className="input" type="number" min={tipo === 'AJUSTE' ? '0' : '1'}
@@ -183,7 +176,6 @@ function MovimientoModal({ onGuardado, onCerrar }: { onGuardado: (r: ResultadoMo
     );
 }
 
-// ─── página ───
 export default function KardexPage() {
     const [q, setQ] = useState('');
     const [tipo, setTipo] = useState('');

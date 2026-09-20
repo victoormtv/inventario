@@ -17,7 +17,6 @@ import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
 import StockLevel from '../components/ui/StockLevel';
 import { useToast } from '../components/ui/Toast';
 
-// ─────────── tipos de formulario ───────────
 interface FormProducto {
     sku: string; nombre: string; categoria: string;
     precio_costo: string; precio_venta: string; stock_minimo: string;
@@ -27,9 +26,8 @@ interface FormVariante { talla: string; color: string; stock_inicial: string; }
 const FORM_PROD_VACIO: FormProducto = { sku: '', nombre: '', categoria: '', precio_costo: '', precio_venta: '', stock_minimo: '5' };
 const FORM_VAR_VACIO: FormVariante = { talla: '', color: '', stock_inicial: '0' };
 
-// ─────────── modal: producto ───────────
 function ProductoModal({ producto, onGuardado, onCerrar }: {
-    producto: ProductoResumen | null; // null = nuevo
+    producto: ProductoResumen | null;
     onGuardado: () => void; onCerrar: () => void;
 }) {
     const toast = useToast();
@@ -107,7 +105,6 @@ function ProductoModal({ producto, onGuardado, onCerrar }: {
     );
 }
 
-// ─────────── modal: variantes ───────────
 function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }) {
     const toast = useToast();
     const { data, loading, refetch } = useApi<ProductoDetalle>(`/api/productos/${sku}`);
@@ -146,7 +143,6 @@ function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }
 
     return (
         <Modal abierto onCerrar={onCerrar} titulo="Variantes" subtitulo={`${data?.nombre ?? sku} · ${sku}`} ancho>
-            {/* Tabla de variantes existentes */}
             <div style={{ marginBottom: 24 }}>
                 {loading ? <TablaSkeleton filas={3} /> : !data?.variantes.length ? (
                     <p style={{ color: 'var(--ink-2)', fontSize: 14 }}>Este producto todavía no tiene variantes.</p>
@@ -176,7 +172,6 @@ function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }
                 )}
             </div>
 
-            {/* Formulario nueva variante */}
             <div style={{ borderTop: '1px solid var(--line-soft)', paddingTop: 20 }}>
                 <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>Agregar variante</p>
                 {error && <Callout tono="danger" >{error}</Callout>}
@@ -204,7 +199,6 @@ function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }
     );
 }
 
-// ─────────── página principal ───────────
 export default function InventarioPage() {
     const toast = useToast();
     const [q, setQ] = useState('');
@@ -279,7 +273,6 @@ export default function InventarioPage() {
                     </select>
                 </div>
 
-                {/* Tabla */}
                 {lista.error ? (
                     <ErrorState mensaje={lista.error} onReintentar={refetch} />
                 ) : !lista.data ? (
@@ -349,7 +342,6 @@ export default function InventarioPage() {
                 )}
             </Panel>
 
-            {/* Modales */}
             {modalProducto && (
                 <ProductoModal
                     producto={modalProducto === 'nuevo' ? null : modalProducto}
