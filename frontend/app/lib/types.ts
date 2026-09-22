@@ -76,6 +76,9 @@ export interface KpiData {
     stock_valorizado: number;
     alertas_stock_bajo: number;
     detalle_alertas: AlertaStock[];
+    ganancia_diaria?: number;
+    ganancia_semanal?: number;
+    ganancia_mensual?: number;
 }
 
 export interface EstadoAlertas {

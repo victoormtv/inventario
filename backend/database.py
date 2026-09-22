@@ -132,6 +132,13 @@ def inicializar_bd():
     """)
 
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reportes_enviados (
+            periodo TEXT PRIMARY KEY,
+            fecha_envio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS transacciones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tipo TEXT CHECK(tipo IN ('venta', 'compra')),

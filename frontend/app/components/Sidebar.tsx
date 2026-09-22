@@ -28,7 +28,7 @@ export default function Sidebar({ usuario }: { usuario: string }) {
                     <FaWarehouse />
                 </div>
                 <div className="sidebar__text">
-                    <div className="sidebar__name">ERP Inventario</div>
+                    <div className="sidebar__name">Nathan Inventario</div>
                     <div className="sidebar__sub">Control de stock</div>
                 </div>
             </div>

@@ -1,4 +1,6 @@
 import os
+import threading
+import time
 from typing import Annotated, Literal
 
 from dotenv import load_dotenv
@@ -20,12 +22,28 @@ from auth import (
     verificar_bloqueo,
 )
 from database import ALMACEN_ID, get_db, inicializar_bd, transaccion
-from reportes import router as reportes_router
+from reportes import router as reportes_router, verificar_y_enviar_reporte_mensual_automatico
 from servicios import aplicar_movimiento, auditar
 
 inicializar_bd()
 
 app = FastAPI(title="API Sistema de Inventario", version="2.0")
+
+
+def _planificador_reporte_mensual():
+    while True:
+        try:
+            verificar_y_enviar_reporte_mensual_automatico()
+        except Exception:
+            pass
+        time.sleep(14400)  # Revisa cada 4 horas
+
+
+@app.on_event("startup")
+def iniciar_planificador():
+    t = threading.Thread(target=_planificador_reporte_mensual, daemon=True)
+    t.start()
+
 
 origenes = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
 app.add_middleware(
@@ -342,12 +360,34 @@ def obtener_kpis(db=Depends(get_db)):
            FROM variantes v JOIN productos p ON p.sku = v.sku_producto"""
     ).fetchone()
     alertas = productos_bajo_minimo(db)
+
+    ganancia_diaria = db.execute(
+        """SELECT COALESCE(SUM(k.cantidad * (p.precio_venta - p.precio_costo)), 0)
+           FROM kardex k JOIN productos p ON p.sku = k.sku_producto
+           WHERE k.tipo_movimiento = 'SALIDA' AND date(k.fecha, 'localtime') = date('now', 'localtime')"""
+    ).fetchone()[0]
+
+    ganancia_semanal = db.execute(
+        """SELECT COALESCE(SUM(k.cantidad * (p.precio_venta - p.precio_costo)), 0)
+           FROM kardex k JOIN productos p ON p.sku = k.sku_producto
+           WHERE k.tipo_movimiento = 'SALIDA' AND date(k.fecha, 'localtime') >= date('now', 'localtime', '-6 days')"""
+    ).fetchone()[0]
+
+    ganancia_mensual = db.execute(
+        """SELECT COALESCE(SUM(k.cantidad * (p.precio_venta - p.precio_costo)), 0)
+           FROM kardex k JOIN productos p ON p.sku = k.sku_producto
+           WHERE k.tipo_movimiento = 'SALIDA' AND strftime('%Y-%m', k.fecha, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"""
+    ).fetchone()[0]
+
     return {
         "total_productos": total_productos,
         "unidades_totales": fila["unidades"],
         "stock_valorizado": round(fila["valorizado"], 2),
         "alertas_stock_bajo": len(alertas),
         "detalle_alertas": alertas,
+        "ganancia_diaria": round(ganancia_diaria, 2),
+        "ganancia_semanal": round(ganancia_semanal, 2),
+        "ganancia_mensual": round(ganancia_mensual, 2),
     }
 
 

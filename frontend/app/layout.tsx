@@ -12,7 +12,7 @@ const manrope = Manrope({
 });
 
 export const metadata = {
-  title: 'ERP Inventario',
+  title: 'Nathan Inventario',
   description: 'Control de stock, variantes, kardex y reportes',
 };
 

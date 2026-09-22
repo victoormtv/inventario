@@ -37,19 +37,46 @@ def destinatarios() -> list[str]:
     return [d.strip() for d in crudo.split(",") if d.strip()]
 
 
-def enviar_correo(asunto: str, texto: str) -> str | None:
-    """Envía un correo. Devuelve None si salió bien, o el motivo del error (sin lanzar excepción)."""
+def enviar_correo(
+    asunto: str,
+    texto: str,
+    destino: str | list[str] | None = None,
+    adjunto_bytes: bytes | None = None,
+    adjunto_nombre: str | None = None,
+    media_type: str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+) -> str | None:
+    """Envía un correo con opcional adjunto. Devuelve None si salió bien, o el motivo del error."""
     if not correo_configurado():
         return "El correo no está configurado."
     usuario = os.environ["SMTP_USER"]
     clave = os.environ["SMTP_PASSWORD"]
     host = os.environ["SMTP_HOST"]
 
+    if destino:
+        if isinstance(destino, str):
+            lista_dest = [d.strip() for d in destino.split(",") if d.strip()]
+        else:
+            lista_dest = destino
+    else:
+        lista_dest = destinatarios()
+
+    if not lista_dest:
+        return "No hay destinatarios especificados."
+
     msg = EmailMessage()
     msg["From"] = os.environ.get("SMTP_FROM") or usuario
-    msg["To"] = ", ".join(destinatarios())
+    msg["To"] = ", ".join(lista_dest)
     msg["Subject"] = asunto
     msg.set_content(texto)
+
+    if adjunto_bytes and adjunto_nombre:
+        maintype, subtype = media_type.split("/", 1)
+        msg.add_attachment(
+            adjunto_bytes,
+            maintype=maintype,
+            subtype=subtype,
+            filename=adjunto_nombre,
+        )
 
     try:
         puerto = int(os.environ.get("SMTP_PORT", "587"))
@@ -65,7 +92,7 @@ def enviar_correo(asunto: str, texto: str) -> str | None:
                 servidor.send_message(msg)
         return None
     except Exception as exc:  # contraseña incorrecta, sin internet, puerto bloqueado, etc.
-        log.warning("No se pudo enviar el correo de alerta: %s", exc)
+        log.warning("No se pudo enviar el correo: %s", exc)
         return str(exc)
 
 

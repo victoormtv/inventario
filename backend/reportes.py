@@ -1,4 +1,6 @@
 """Exportar (Excel / PDF) e importar desde Excel."""
+import calendar
+import logging
 from datetime import date
 from io import BytesIO
 
@@ -13,9 +15,12 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from alertas import correo_configurado, destinatarios, enviar_correo
 from auth import usuario_actual
-from database import ALMACEN_ID, get_db, transaccion
+from database import ALMACEN_ID, conectar, get_db, transaccion
 from servicios import aplicar_movimiento, auditar
+
+log = logging.getLogger("inventario.reportes")
 
 router = APIRouter(prefix="/api", dependencies=[Depends(usuario_actual)])
 
@@ -83,6 +88,207 @@ def exportar_kardex(desde: str = "", hasta: str = "", db=Depends(get_db)):
         params=params,
     )
     return _descarga(_excel_bytes({"Kardex": df}), f"kardex_{date.today()}.xlsx", XLSX)
+
+
+def _generar_excel_rango_bytes(db, desde: str = "", hasta: str = "", q: str = "", categoria: str = "") -> BytesIO:
+    where, params = [], []
+    if desde:
+        where.append("date(k.fecha, 'localtime') >= ?")
+        params.append(desde)
+    if hasta:
+        where.append("date(k.fecha, 'localtime') <= ?")
+        params.append(hasta)
+    if q.strip():
+        like = f"%{q.strip()}%"
+        where.append("(k.sku_producto LIKE ? OR p.nombre LIKE ? OR k.referencia LIKE ?)")
+        params += [like, like, like]
+    if categoria.strip():
+        where.append("p.categoria = ?")
+        params.append(categoria.strip())
+
+    cond = (" WHERE " + " AND ".join(where)) if where else ""
+
+    df_kardex = pd.read_sql_query(
+        f"""SELECT datetime(k.fecha, 'localtime') AS Fecha, k.sku_producto AS SKU, p.nombre AS Producto,
+                   p.categoria AS Categoría, v.talla AS Talla, v.color AS Color,
+                   k.tipo_movimiento AS Tipo, k.cantidad AS Cantidad,
+                   k.stock_anterior AS "Stock anterior", k.stock_resultante AS "Stock resultante",
+                   k.referencia AS Referencia, k.usuario AS Usuario
+            FROM kardex k
+            LEFT JOIN productos p ON p.sku = k.sku_producto
+            LEFT JOIN variantes v ON v.id = k.id_variante
+            {cond} ORDER BY k.fecha DESC, k.id DESC""",
+        db,
+        params=params,
+    )
+
+    df_resumen = pd.read_sql_query(
+        f"""SELECT k.sku_producto AS SKU, p.nombre AS Producto, p.categoria AS Categoría,
+                   SUM(CASE WHEN k.tipo_movimiento = 'ENTRADA' THEN k.cantidad ELSE 0 END) AS "Total Entradas",
+                   SUM(CASE WHEN k.tipo_movimiento = 'SALIDA' THEN k.cantidad ELSE 0 END) AS "Total Salidas",
+                   SUM(CASE WHEN k.tipo_movimiento = 'AJUSTE' THEN k.cantidad ELSE 0 END) AS "Ajustes Directos"
+            FROM kardex k
+            LEFT JOIN productos p ON p.sku = k.sku_producto
+            {cond}
+            GROUP BY k.sku_producto, p.nombre, p.categoria
+            ORDER BY p.nombre COLLATE NOCASE""",
+        db,
+        params=params,
+    )
+
+    where_inv, params_inv = [], []
+    if q.strip():
+        like = f"%{q.strip()}%"
+        where_inv.append("(p.sku LIKE ? OR p.nombre LIKE ?)")
+        params_inv += [like, like]
+    if categoria.strip():
+        where_inv.append("p.categoria = ?")
+        params_inv.append(categoria.strip())
+    cond_inv = (" WHERE " + " AND ".join(where_inv)) if where_inv else ""
+
+    df_inventario = pd.read_sql_query(
+        f"""SELECT p.sku AS SKU, p.nombre AS Producto, p.categoria AS Categoría,
+                  v.talla AS Talla, v.color AS Color,
+                  COALESCE(v.stock_actual, 0) AS Stock, p.stock_minimo AS "Stock mínimo",
+                  p.precio_costo AS Costo, p.precio_venta AS Venta,
+                  COALESCE(v.stock_actual, 0) * p.precio_costo AS "Valor en stock"
+           FROM productos p LEFT JOIN variantes v ON v.sku_producto = p.sku
+           {cond_inv}
+           ORDER BY p.nombre COLLATE NOCASE, v.talla, v.color""",
+        db,
+        params=params_inv,
+    )
+
+    hojas = {
+        "Movimientos en Rango": df_kardex,
+        "Resumen por Producto": df_resumen,
+        "Inventario Filtrado": df_inventario,
+    }
+    return _excel_bytes(hojas)
+
+
+@router.get("/exportar/excel-rango")
+def exportar_excel_rango(desde: str = "", hasta: str = "", q: str = "", categoria: str = "", db=Depends(get_db)):
+    buf = _generar_excel_rango_bytes(db, desde, hasta, q, categoria)
+    nombre = f"reporte_inventario_{desde or 'inicio'}_a_{hasta or 'fin'}.xlsx"
+    return _descarga(buf, nombre, XLSX)
+
+
+@router.post("/reportes/enviar-mensual")
+def enviar_reporte_mensual(
+    anio: int = Query(..., ge=2000, le=2100),
+    mes: int = Query(..., ge=1, le=12),
+    destino: str = Query(""),
+    db=Depends(get_db),
+    usuario: str = Depends(usuario_actual),
+):
+    if not correo_configurado():
+        raise HTTPException(400, "El correo no está configurado en el servidor. Configura las variables SMTP_* en backend/.env.")
+
+    _, ultimo_dia = calendar.monthrange(anio, mes)
+    desde = f"{anio:04d}-{mes:02d}-01"
+    hasta = f"{anio:04d}-{mes:02d}-{ultimo_dia:02d}"
+
+    buf = _generar_excel_rango_bytes(db, desde, hasta)
+    nombre_archivo = f"reporte_mensual_{anio}_{mes:02d}.xlsx"
+
+    asunto = f"📊 Reporte Mensual de Inventario - {mes:02d}/{anio}"
+    cuerpo = (
+        f"Reporte consolidado de inventario y movimientos correspondiente al período del {desde} al {hasta}.\n\n"
+        f"Generado por: {usuario}\n"
+        f"Fecha de emisión: {date.today():%d/%m/%Y}\n"
+    )
+
+    error = enviar_correo(
+        asunto=asunto,
+        texto=cuerpo,
+        destino=destino or None,
+        adjunto_bytes=buf.getvalue(),
+        adjunto_nombre=nombre_archivo,
+    )
+
+    if error:
+        raise HTTPException(502, f"Error al enviar el correo: {error}")
+
+    auditar(db, usuario, f"Envió reporte mensual en Excel ({mes:02d}/{anio}) por correo")
+    return {"enviado": True, "mensaje": f"Reporte del mes {mes:02d}/{anio} enviado con éxito por correo."}
+
+
+def verificar_y_enviar_reporte_mensual_automatico():
+    """Se ejecuta en segundo plano. Si es día 1 del mes y no se ha enviado el reporte del mes anterior, lo envía automáticamente."""
+    hoy = date.today()
+    if hoy.month == 1:
+        mes_ant, anio_ant = 12, hoy.year - 1
+    else:
+        mes_ant, anio_ant = hoy.month - 1, hoy.year
+
+    periodo = f"{anio_ant:04d}-{mes_ant:02d}"
+
+    conn = conectar()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS reportes_enviados (
+                periodo TEXT PRIMARY KEY,
+                fecha_envio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        ya_enviado = cur.execute("SELECT 1 FROM reportes_enviados WHERE periodo = ?", (periodo,)).fetchone()
+
+        if hoy.day == 1 and not ya_enviado:
+            if correo_configurado():
+                _, ultimo_dia = calendar.monthrange(anio_ant, mes_ant)
+                desde = f"{periodo}-01"
+                hasta = f"{periodo}-{ultimo_dia:02d}"
+
+                buf = _generar_excel_rango_bytes(conn, desde, hasta)
+                asunto = f"📊 [AUTOMÁTICO] Reporte Mensual de Inventario - {mes_ant:02d}/{anio_ant}"
+                cuerpo = (
+                    f"Reporte mensual automatizado correspondiente al período {desde} al {hasta}.\n\n"
+                    f"Este correo fue generado automáticamente por el Sistema de Inventario el primer día del mes.\n"
+                )
+
+                error = enviar_correo(
+                    asunto=asunto,
+                    texto=cuerpo,
+                    adjunto_bytes=buf.getvalue(),
+                    adjunto_nombre=f"reporte_mensual_{periodo}.xlsx",
+                )
+
+                if not error:
+                    cur.execute("INSERT INTO reportes_enviados (periodo) VALUES (?)", (periodo,))
+                    cur.execute("INSERT INTO auditoria (usuario, accion) VALUES (?, ?)", ("Sistema Automático", f"Envió reporte mensual automático ({periodo})"))
+                    log.info("Reporte mensual automático %s enviado con éxito.", periodo)
+                else:
+                    log.warning("No se pudo enviar el reporte mensual automático %s: %s", periodo, error)
+    except Exception as exc:
+        log.exception("Error comprobando reporte mensual automático: %s", exc)
+    finally:
+        conn.close()
+
+
+@router.get("/reportes/estado-automatico")
+def estado_reporte_automatico(db=Depends(get_db)):
+    hoy = date.today()
+    if hoy.month == 1:
+        mes_ant, anio_ant = 12, hoy.year - 1
+    else:
+        mes_ant, anio_ant = hoy.month - 1, hoy.year
+    periodo_anterior = f"{anio_ant:04d}-{mes_ant:02d}"
+
+    enviado = db.execute("SELECT fecha_envio FROM reportes_enviados WHERE periodo = ?", (periodo_anterior,)).fetchone()
+    ultimos = db.execute("SELECT periodo, fecha_envio FROM reportes_enviados ORDER BY fecha_envio DESC LIMIT 5").fetchall()
+
+    return {
+        "programado": True,
+        "frecuencia": "Día 1 de cada mes a las 00:00 UTC/Local",
+        "correo_configurado": correo_configurado(),
+        "destinatarios": destinatarios() if correo_configurado() else [],
+        "periodo_anterior": periodo_anterior,
+        "enviado_periodo_anterior": bool(enviado),
+        "fecha_ultimo_envio": enviado["fecha_envio"] if enviado else None,
+        "historial": [dict(u) for u in ultimos],
+    }
 
 
 @router.get("/exportar/pdf")

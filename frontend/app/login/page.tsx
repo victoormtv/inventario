@@ -42,7 +42,7 @@ export default function LoginPage() {
                     <div className="sidebar__logo">
                         <FaWarehouse />
                     </div>
-                    ERP Inventario
+                    Nathan Inventario
                 </div>
 
                 <div>
@@ -95,7 +95,7 @@ export default function LoginPage() {
                         <div className="sidebar__logo">
                             <FaWarehouse />
                         </div>
-                        ERP Inventario
+                        Nathan Inventario
                     </div>
 
                     <div>
