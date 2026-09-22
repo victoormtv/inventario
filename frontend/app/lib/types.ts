@@ -101,3 +101,29 @@ export interface ResultadoImportacion {
     errores: { fila: number; errores: string[] }[];
     total_errores: number;
 }
+
+export interface Contacto {
+    id: number;
+    tipo: 'cliente' | 'proveedor';
+    nombre: string;
+    documento: string | null;
+    telefono: string | null;
+    email: string | null;
+    direccion: string | null;
+}
+
+export interface ResultadoIngreso {
+    id: number;
+    sku: string;
+    nombre: string;
+    tipo: 'ENTRADA';
+    cantidad: number;
+    stock_anterior: number;
+    stock_resultante: number;
+    stock_minimo: number;
+    total_antes: number;
+    total_despues: number;
+    precio_anterior: number | null;
+    precio_nuevo: number;
+    proveedor: string;
+}

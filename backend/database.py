@@ -154,12 +154,18 @@ def inicializar_bd():
     _agregar_columna(cursor, "kardex", "stock_anterior", "INTEGER")
     _agregar_columna(cursor, "kardex", "stock_resultante", "INTEGER")
     _agregar_columna(cursor, "kardex", "usuario", "TEXT")
+    _agregar_columna(cursor, "terceros", "email", "TEXT")
+    _agregar_columna(cursor, "terceros", "direccion", "TEXT")
+    _agregar_columna(cursor, "kardex", "id_proveedor", "INTEGER")
+    _agregar_columna(cursor, "kardex", "precio_unitario", "REAL")
+    _agregar_columna(cursor, "kardex", "precio_anterior", "REAL")
 
     # Índices para que las búsquedas sigan rápidas cuando crezca el inventario
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_variantes_sku ON variantes(sku_producto)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_sku ON kardex(sku_producto)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_fecha ON kardex(fecha)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_variante ON kardex(id_variante)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_proveedor ON kardex(id_proveedor)")
 
     # Almacén único
     cursor.execute(

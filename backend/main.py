@@ -24,6 +24,7 @@ from auth import (
 from database import ALMACEN_ID, get_db, inicializar_bd, transaccion
 from reportes import router as reportes_router, verificar_y_enviar_reporte_mensual_automatico
 from servicios import aplicar_movimiento, auditar
+from mercaderia import router as mercaderia_router
 
 inicializar_bd()
 
@@ -102,6 +103,15 @@ class MovimientoIn(BaseModel):
         if self.tipo_movimiento != "AJUSTE" and self.cantidad <= 0:
             raise ValueError("La cantidad debe ser mayor que cero.")
         return self
+
+
+class ContactoIn(BaseModel):
+    tipo: Literal["cliente", "proveedor"]
+    nombre: Texto
+    documento: TextoOpcional = ""
+    telefono: TextoOpcional = ""
+    email: TextoOpcional = ""
+    direccion: TextoOpcional = ""
 
 
 # ───────────────────────── Sesión ─────────────────────────
@@ -426,5 +436,69 @@ def ver_auditoria(page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=20
     return {"items": [dict(f) for f in filas], "total": total, "page": page, "limit": limit}
 
 
+# ───────────────────────── Contactos / Terceros ─────────────────────────
+@router.get("/contactos")
+def listar_contactos(
+    q: str = "",
+    tipo: str = "",
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=200),
+    db=Depends(get_db),
+):
+    where, params = [], []
+    if q.strip():
+        like = f"%{q.strip()}%"
+        where.append("(nombre LIKE ? OR documento LIKE ? OR telefono LIKE ? OR email LIKE ?)")
+        params += [like, like, like, like]
+    if tipo in ("cliente", "proveedor"):
+        where.append("tipo = ?")
+        params.append(tipo)
+
+    cond = (" WHERE " + " AND ".join(where)) if where else ""
+    total = db.execute(f"SELECT COUNT(*) FROM terceros {cond}", params).fetchone()[0]
+    filas = db.execute(
+        f"SELECT id, tipo, nombre, documento, telefono, email, direccion FROM terceros {cond} ORDER BY nombre COLLATE NOCASE LIMIT ? OFFSET ?",
+        params + [limit, (page - 1) * limit],
+    ).fetchall()
+    return {"items": [dict(f) for f in filas], "total": total, "page": page, "limit": limit}
+
+
+@router.post("/contactos", status_code=201)
+def crear_contacto(c: ContactoIn, db=Depends(get_db), usuario: str = Depends(usuario_actual)):
+    with transaccion(db):
+        cur = db.execute(
+            "INSERT INTO terceros (tipo, nombre, documento, telefono, email, direccion) VALUES (?, ?, ?, ?, ?, ?)",
+            (c.tipo, c.nombre, c.documento, c.telefono, c.email, c.direccion),
+        )
+        auditar(db, usuario, f"Creó contacto ({c.tipo}): {c.nombre}")
+    return {"id": cur.lastrowid}
+
+
+@router.put("/contactos/{id_contacto}")
+def editar_contacto(id_contacto: int, c: ContactoIn, db=Depends(get_db), usuario: str = Depends(usuario_actual)):
+    with transaccion(db):
+        actual = db.execute("SELECT * FROM terceros WHERE id = ?", (id_contacto,)).fetchone()
+        if not actual:
+            raise HTTPException(404, "Contacto no encontrado.")
+        db.execute(
+            "UPDATE terceros SET tipo=?, nombre=?, documento=?, telefono=?, email=?, direccion=? WHERE id=?",
+            (c.tipo, c.nombre, c.documento, c.telefono, c.email, c.direccion, id_contacto),
+        )
+        auditar(db, usuario, f"Editó contacto ({c.tipo}): {c.nombre}")
+    return {"id": id_contacto}
+
+
+@router.delete("/contactos/{id_contacto}")
+def eliminar_contacto(id_contacto: int, db=Depends(get_db), usuario: str = Depends(usuario_actual)):
+    with transaccion(db):
+        actual = db.execute("SELECT * FROM terceros WHERE id = ?", (id_contacto,)).fetchone()
+        if not actual:
+            raise HTTPException(404, "Contacto no encontrado.")
+        db.execute("DELETE FROM terceros WHERE id = ?", (id_contacto,))
+        auditar(db, usuario, f"Eliminó contacto {actual['nombre']}")
+    return {"id": id_contacto}
+
+
 app.include_router(router)
 app.include_router(reportes_router)
+app.include_router(mercaderia_router)

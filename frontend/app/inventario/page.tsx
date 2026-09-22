@@ -16,6 +16,7 @@ import SearchInput from '../components/ui/SearchInput';
 import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
 import StockLevel from '../components/ui/StockLevel';
 import { useToast } from '../components/ui/Toast';
+import IngresoMercaderiaModal from './IngresoMercaderia';
 
 interface FormProducto {
     sku: string; nombre: string; categoria: string;
@@ -216,6 +217,7 @@ export default function InventarioPage() {
     const cats = useApi<string[]>('/api/categorias');
 
     const [modalProducto, setModalProducto] = useState<'nuevo' | ProductoResumen | null>(null);
+    const [modalIngreso, setModalIngreso] = useState(false);
     const [modalVariantes, setModalVariantes] = useState<string | null>(null);
     const [confirmarEliminar, setConfirmarEliminar] = useState<ProductoResumen | null>(null);
     const [eliminando, setEliminando] = useState(false);
@@ -250,6 +252,9 @@ export default function InventarioPage() {
                         <Button variante="primario" onClick={() => setModalProducto('nuevo')}
                             icono={<FaPlus style={{ fontSize: 11 }} />}>
                             Nuevo producto
+                        </Button>
+                        <Button onClick={() => setModalIngreso(true)} icono={<FaBoxOpen style={{ fontSize: 11 }} />}>
+                            Ingreso de mercadería
                         </Button>
                     </>
                 }
@@ -351,6 +356,10 @@ export default function InventarioPage() {
             )}
             {modalVariantes && (
                 <VariantesModal sku={modalVariantes} onCerrar={() => { setModalVariantes(null); refetch(); }} />
+            )}
+
+            {modalIngreso && (
+                <IngresoMercaderiaModal onCerrar={() => setModalIngreso(false)} onGuardado={() => { setModalIngreso(false); refetch(); }} />
             )}
             <ConfirmarModal
                 abierto={!!confirmarEliminar}

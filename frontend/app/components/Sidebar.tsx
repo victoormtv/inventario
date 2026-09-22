@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { FaChartPie, FaBoxOpen, FaExchangeAlt, FaFileAlt, FaWarehouse, FaSignOutAlt } from 'react-icons/fa';
+import { FaChartPie, FaBoxOpen, FaExchangeAlt, FaFileAlt, FaAddressBook, FaWarehouse, FaSignOutAlt } from 'react-icons/fa';
 import { useApi } from '../lib/useApi';
 import { cerrarSesion } from '../lib/session';
 import type { EstadoAlertas } from '../lib/types';
@@ -10,6 +10,7 @@ const links = [
     { href: '/', label: 'Dashboard', icon: FaChartPie },
     { href: '/inventario', label: 'Inventario', icon: FaBoxOpen, conAlertas: true },
     { href: '/kardex', label: 'Kardex', icon: FaExchangeAlt },
+    { href: '/contactos', label: 'Contactos', icon: FaAddressBook },
     { href: '/reportes', label: 'Reportes', icon: FaFileAlt },
 ];
 
