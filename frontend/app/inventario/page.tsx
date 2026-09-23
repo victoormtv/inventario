@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { FaBoxOpen, FaEdit, FaLayerGroup, FaPlus, FaSync, FaTrash } from 'react-icons/fa';
+import { FaBoxOpen, FaChartLine, FaEdit, FaLayerGroup, FaPlus, FaSync, FaTrash } from 'react-icons/fa';
 import { api } from '../lib/api';
 import { moneda } from '../lib/format';
 import { useApi } from '../lib/useApi';
@@ -17,6 +17,7 @@ import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
 import StockLevel from '../components/ui/StockLevel';
 import { useToast } from '../components/ui/Toast';
 import IngresoMercaderiaModal from './IngresoMercaderia';
+import HistorialPreciosModal from './HistorialPreciosModal';
 
 interface FormProducto {
     sku: string; nombre: string; categoria: string;
@@ -221,6 +222,7 @@ export default function InventarioPage() {
     const [modalVariantes, setModalVariantes] = useState<string | null>(null);
     const [confirmarEliminar, setConfirmarEliminar] = useState<ProductoResumen | null>(null);
     const [eliminando, setEliminando] = useState(false);
+    const [modalHistorial, setModalHistorial] = useState<ProductoResumen | null>(null);
 
     const refetch = () => lista.refetch();
 
@@ -328,6 +330,10 @@ export default function InventarioPage() {
                                                     onClick={() => setModalVariantes(p.sku)} aria-label="Ver variantes">
                                                     <FaLayerGroup style={{ fontSize: 12 }} />
                                                 </button>
+                                                <button className="icon-btn" title="Historial de precios"
+                                                    onClick={() => setModalHistorial(p)} aria-label="Historial de precios">
+                                                    <FaChartLine style={{ fontSize: 12 }} />
+                                                </button>
                                                 <button className="icon-btn" title="Editar"
                                                     onClick={() => setModalProducto(p)} aria-label="Editar producto">
                                                     <FaEdit style={{ fontSize: 12 }} />
@@ -353,6 +359,9 @@ export default function InventarioPage() {
                     onCerrar={() => setModalProducto(null)}
                     onGuardado={() => { setModalProducto(null); refetch(); }}
                 />
+            )}
+            {modalHistorial && (
+                <HistorialPreciosModal sku={modalHistorial.sku} nombre={modalHistorial.nombre} onCerrar={() => setModalHistorial(null)} />
             )}
             {modalVariantes && (
                 <VariantesModal sku={modalVariantes} onCerrar={() => { setModalVariantes(null); refetch(); }} />

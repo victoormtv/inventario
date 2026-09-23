@@ -127,3 +127,14 @@ export interface ResultadoIngreso {
     precio_nuevo: number;
     proveedor: string;
 }
+
+export interface HistorialPrecio {
+    id: number;
+    fecha: string;
+    cantidad: number;
+    precio_anterior: number | null;
+    precio_nuevo: number;
+    proveedor: string | null;
+    referencia: string | null;
+    variacion_pct: number | null;
+}

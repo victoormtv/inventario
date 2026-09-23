@@ -46,3 +46,25 @@ def registrar_ingreso(
     r["proveedor"] = proveedor["nombre"]
     fondo.add_task(notificar_cruce, r)
     return r
+
+@router.get("/historial-precios/{sku}")
+def historial_precios(sku: str, db=Depends(get_db)):
+    filas = db.execute(
+        """SELECT k.id, k.fecha, k.cantidad, k.precio_anterior, k.precio_unitario AS precio_nuevo,
+                  t.nombre AS proveedor, k.referencia
+           FROM kardex k
+           LEFT JOIN terceros t ON t.id = k.id_proveedor
+           WHERE k.sku_producto = ? AND k.tipo_movimiento = 'ENTRADA' AND k.precio_unitario IS NOT NULL
+           ORDER BY k.fecha DESC, k.id DESC""",
+        (sku,),
+    ).fetchall()
+
+    items = []
+    for f in filas:
+        d = dict(f)
+        if d["precio_anterior"] is not None and d["precio_anterior"] > 0:
+            d["variacion_pct"] = round((d["precio_nuevo"] - d["precio_anterior"]) / d["precio_anterior"] * 100, 2)
+        else:
+            d["variacion_pct"] = None
+        items.append(d)
+    return items
