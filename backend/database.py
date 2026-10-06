@@ -5,16 +5,14 @@ from contextlib import contextmanager
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("INVENTARIO_DB", os.path.join(BASE_DIR, "inventario.db"))
 
-# Sistema de un solo almacén: todas las variantes viven en la sucursal 1.
 ALMACEN_ID = 1
 
 
 def conectar() -> sqlite3.Connection:
-    """Abre una conexión lista para usar (claves foráneas activas, modo WAL)."""
     conn = sqlite3.connect(
         DB_PATH,
-        check_same_thread=False,  # FastAPI puede atender una petición desde distintos hilos
-        isolation_level=None,     # las transacciones se manejan a mano (ver transaccion())
+        check_same_thread=False,
+        isolation_level=None,
         timeout=10,
     )
     conn.row_factory = sqlite3.Row
@@ -25,7 +23,6 @@ def conectar() -> sqlite3.Connection:
 
 
 def get_db():
-    """Dependencia de FastAPI: una conexión por petición, siempre cerrada al final."""
     conn = conectar()
     try:
         yield conn
@@ -35,11 +32,6 @@ def get_db():
 
 @contextmanager
 def transaccion(conn: sqlite3.Connection):
-    """Agrupa varias escrituras en una sola operación: o se guardan todas o ninguna.
-
-    BEGIN IMMEDIATE toma el bloqueo de escritura desde el inicio, así dos
-    movimientos simultáneos no pueden leer el mismo stock y pisarse.
-    """
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn
@@ -96,7 +88,7 @@ def inicializar_bd():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             sku_producto TEXT,
-            tipo_movimiento TEXT, -- ENTRADA, SALIDA, AJUSTE
+            tipo_movimiento TEXT,
             cantidad INTEGER,
             referencia TEXT,
             id_sucursal INTEGER
@@ -149,7 +141,47 @@ def inicializar_bd():
         )
     """)
 
-    # --- Migraciones: el kardex ahora sabe qué variante se movió, quién y cuánto quedó ---
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ventas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo_comprobante TEXT CHECK(tipo_comprobante IN ('boleta','factura')),
+            serie TEXT,
+            numero INTEGER,
+            id_cliente INTEGER,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            subtotal REAL,
+            total REAL,
+            ganancia_total REAL,
+            usuario TEXT,
+            estado TEXT DEFAULT 'emitida',
+            FOREIGN KEY(id_cliente) REFERENCES terceros(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ventas_detalle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_venta INTEGER,
+            id_variante INTEGER,
+            sku_producto TEXT,
+            descripcion TEXT,
+            cantidad INTEGER,
+            precio_costo REAL,
+            precio_venta REAL,
+            ganancia REAL,
+            FOREIGN KEY(id_venta) REFERENCES ventas(id),
+            FOREIGN KEY(id_variante) REFERENCES variantes(id)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS correlativos (
+            serie TEXT PRIMARY KEY,
+            ultimo INTEGER DEFAULT 0
+        )
+    """)
+
+    # ── Migraciones existentes ──
     _agregar_columna(cursor, "kardex", "id_variante", "INTEGER")
     _agregar_columna(cursor, "kardex", "stock_anterior", "INTEGER")
     _agregar_columna(cursor, "kardex", "stock_resultante", "INTEGER")
@@ -159,18 +191,38 @@ def inicializar_bd():
     _agregar_columna(cursor, "kardex", "id_proveedor", "INTEGER")
     _agregar_columna(cursor, "kardex", "precio_unitario", "REAL")
     _agregar_columna(cursor, "kardex", "precio_anterior", "REAL")
+    _agregar_columna(cursor, "ventas", "metodo_pago", "TEXT DEFAULT 'efectivo'")
+    _agregar_columna(cursor, "ventas", "monto_pagado", "REAL")
+    _agregar_columna(cursor, "ventas", "vuelto", "REAL DEFAULT 0")
+    _agregar_columna(cursor, "ventas", "descuento", "REAL DEFAULT 0")
+    _agregar_columna(cursor, "ventas", "observaciones", "TEXT")
+    _agregar_columna(cursor, "ventas", "igv_total", "REAL DEFAULT 0")
+    _agregar_columna(cursor, "ventas_detalle", "unidad_medida", "TEXT DEFAULT 'NIU'")
+    _agregar_columna(cursor, "ventas_detalle", "tipo_item", "TEXT DEFAULT 'bien'")
+    _agregar_columna(cursor, "ventas_detalle", "valor_unitario", "REAL")
+    _agregar_columna(cursor, "ventas_detalle", "igv", "REAL DEFAULT 0")
+    _agregar_columna(cursor, "ventas", "id_vendedor", "INTEGER")
 
-    # Índices para que las búsquedas sigan rápidas cuando crezca el inventario
+    # ── Nuevas columnas en variantes ──
+    _agregar_columna(cursor, "variantes", "detalle", "TEXT")   # Flexible, Extrafuerte, Interiores…
+    _agregar_columna(cursor, "variantes", "kg",      "REAL")   # peso del producto
+    _agregar_columna(cursor, "variantes", "lote",    "TEXT")   # número/código de lote
+
+    # Índices
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_variantes_sku ON variantes(sku_producto)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_sku ON kardex(sku_producto)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_fecha ON kardex(fecha)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_variante ON kardex(id_variante)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_proveedor ON kardex(id_proveedor)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_detalle_venta ON ventas_detalle(id_venta)")
 
-    # Almacén único
     cursor.execute(
         "INSERT OR IGNORE INTO sucursales (id, nombre) VALUES (?, ?)",
         (ALMACEN_ID, "Almacén principal"),
+    )
+    cursor.execute(
+        "INSERT OR IGNORE INTO terceros (id, tipo, nombre, documento) VALUES (1, 'cliente', 'Cliente General', '00000000')",
     )
 
     conn.close()

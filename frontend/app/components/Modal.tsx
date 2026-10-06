@@ -8,10 +8,11 @@ interface Props {
     titulo: string;
     subtitulo?: string;
     ancho?: boolean;
+    anchoMax?: number | string; // px u otra unidad; sobreescribe el ancho de .modal--ancho cuando se necesita más espacio
     children: ReactNode;
 }
 
-export default function Modal({ abierto, onCerrar, titulo, subtitulo, ancho, children }: Props) {
+export default function Modal({ abierto, onCerrar, titulo, subtitulo, ancho, anchoMax, children }: Props) {
     const ref = useRef<HTMLDialogElement>(null);
 
     useEffect(() => {
@@ -25,6 +26,7 @@ export default function Modal({ abierto, onCerrar, titulo, subtitulo, ancho, chi
         <dialog
             ref={ref}
             className={`modal${ancho ? ' modal--ancho' : ''}`}
+            style={anchoMax ? { maxWidth: anchoMax, width: '100%' } : undefined}
             onClose={onCerrar}
             onClick={(e) => {
                 if (e.target === ref.current) onCerrar();

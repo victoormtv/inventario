@@ -1,10 +1,10 @@
 'use client';
 import { FaArrowDown, FaArrowUp, FaMinus } from 'react-icons/fa';
-import { useApi } from '../lib/useApi';
-import { moneda } from '../lib/format';
-import type { HistorialPrecio } from '../lib/types';
-import Modal from '../components/Modal';
-import { TablaSkeleton } from '../components/ui/States';
+import { useApi } from '../../lib/useApi';
+import { moneda } from '../../lib/format';
+import type { HistorialPrecio } from '../../lib/types';
+import Modal from '../Modal';
+import { TablaSkeleton } from '../ui/States';
 
 export default function HistorialPreciosModal({ sku, nombre, onCerrar }: { sku: string; nombre: string; onCerrar: () => void }) {
     const { data, loading } = useApi<HistorialPrecio[]>(`/api/mercaderia/historial-precios/${sku}`);

@@ -1,180 +1,27 @@
 'use client';
 import { useState } from 'react';
-import { FaExchangeAlt, FaPlus } from 'react-icons/fa';
-import { api } from '../lib/api';
+import {
+    FaArrowRight, FaExchangeAlt, FaPlus, FaSearch,
+    FaSync, FaFilter, FaCalendarAlt
+} from 'react-icons/fa';
 import { fechaLocal, hoy } from '../lib/format';
 import { useApi } from '../lib/useApi';
-import type { Movimiento, Paginado, ProductoDetalle, ProductoResumen, ResultadoMovimiento, Variante } from '../lib/types';
-import Badge from '../components/ui/Badge';
-import Button from '../components/ui/Button';
-import { Callout, Field } from '../components/ui/Form';
-import Modal from '../components/Modal';
-import { PageHeader, Panel, PanelHead } from '../components/ui/Panel';
+import type { Movimiento, Paginado, ResultadoMovimiento } from '../lib/types';
 import Pagination from '../components/ui/Pagination';
-import SearchInput from '../components/ui/SearchInput';
 import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
-import { FaArrowRight } from 'react-icons/fa';
+import MovimientoModal from '../components/kardex/MovimientoModal';
+import ResultadoModal from '../components/kardex/ResultadoModal';
+import { TEXTO } from '../components/kardex/constantes';
 
-const TONO = { ENTRADA: 'ok', SALIDA: 'danger', AJUSTE: 'brand' } as const;
-const TEXTO = { ENTRADA: 'Entrada', SALIDA: 'Salida', AJUSTE: 'Ajuste' } as const;
+// Estilos dinámicos asegurando compatibilidad de firma de índice con `string`
+const TIPO_ESTILOS: Record<string, { bg: string; text: string; border: string }> = {
+    ENTRADA: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
+    SALIDA: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200' },
+    AJUSTE: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
+};
 
-function ResultadoModal({ r, onCerrar }: { r: ResultadoMovimiento; onCerrar: () => void }) {
-    const bajoCruce = r.total_antes > r.stock_minimo && r.total_despues <= r.stock_minimo;
-    const agotado = r.total_despues <= 0;
-    return (
-        <Modal abierto onCerrar={onCerrar} titulo="Movimiento registrado">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <Badge tono={TONO[r.tipo]}>{TEXTO[r.tipo]}</Badge>
-                    <span style={{ fontWeight: 700, fontSize: 15 }}>{r.nombre}</span>
-                    <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>{r.sku}</span>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-                    {[
-                        { label: 'Cantidad', valor: r.cantidad, color: 'var(--ink)' },
-                        { label: 'Stock anterior', valor: r.stock_anterior, color: 'var(--ink-2)' },
-                        { label: 'Stock resultante', valor: r.stock_resultante, color: r.stock_resultante <= r.stock_minimo ? 'var(--danger)' : 'var(--ok)' },
-                    ].map(({ label, valor, color }) => (
-                        <div key={label} className="chip">
-                            <strong style={{ color }}>{valor}</strong>
-                            {label}
-                        </div>
-                    ))}
-                </div>
-
-                {agotado && <Callout tono="danger">Este producto quedó sin stock. Se enviará un aviso por correo.</Callout>}
-                {!agotado && bajoCruce && <Callout tono="warn">El stock cruzó el mínimo ({r.stock_minimo} u.). Se enviará un aviso por correo.</Callout>}
-                {!agotado && !bajoCruce && r.stock_resultante <= r.stock_minimo && (
-                    <Callout tono="warn">El stock sigue por debajo del mínimo ({r.stock_minimo} u.).</Callout>
-                )}
-
-                <div className="form__actions">
-                    <Button variante="primario" onClick={onCerrar}>Aceptar</Button>
-                </div>
-            </div>
-        </Modal>
-    );
-}
-
-function MovimientoModal({ onGuardado, onCerrar }: { onGuardado: (r: ResultadoMovimiento) => void; onCerrar: () => void }) {
-    const [tipo, setTipo] = useState<'ENTRADA' | 'SALIDA' | 'AJUSTE'>('ENTRADA');
-    const [q, setQ] = useState('');
-    const [skuSel, setSkuSel] = useState<string | null>(null);
-    const [varianteSel, setVarianteSel] = useState<Variante | null>(null);
-    const [cantidad, setCantidad] = useState('');
-    const [referencia, setReferencia] = useState('');
-    const [error, setError] = useState<string | null>(null);
-    const [enviando, setEnviando] = useState(false);
-
-    const busqueda = useApi<Paginado<ProductoResumen>>(q.length >= 1 ? `/api/productos?q=${encodeURIComponent(q)}&limit=8` : null);
-    const detalle = useApi<ProductoDetalle>(skuSel ? `/api/productos/${skuSel}` : null);
-
-    const seleccionarProducto = (p: ProductoResumen) => {
-        setSkuSel(p.sku); setQ(p.nombre); setVarianteSel(null);
-    };
-
-    const registrar = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!varianteSel) { setError('Selecciona una variante.'); return; }
-        setEnviando(true); setError(null);
-        try {
-            const r = await api<ResultadoMovimiento>('/api/kardex', {
-                method: 'POST',
-                json: { id_variante: varianteSel.id, tipo_movimiento: tipo, cantidad: parseInt(cantidad), referencia },
-            });
-            onGuardado(r);
-        } catch (err) { setError((err as Error).message); }
-        finally { setEnviando(false); }
-    };
-
-    const limpiar = () => { setSkuSel(null); setQ(''); setVarianteSel(null); };
-
-    return (
-        <Modal abierto onCerrar={onCerrar} titulo="Registrar movimiento" subtitulo="Entrada, salida o ajuste de stock">
-            <form className="form" onSubmit={registrar}>
-                {error && <Callout tono="danger">{error}</Callout>}
-
-                <Field label="Tipo de movimiento">
-                    <div className="segmented">
-                        {(['ENTRADA', 'SALIDA', 'AJUSTE'] as const).map(t => (
-                            <label key={t}>
-                                <input type="radio" name="tipo" value={t} checked={tipo === t} onChange={() => setTipo(t)} />
-                                <span>{TEXTO[t]}</span>
-                            </label>
-                        ))}
-                    </div>
-                </Field>
-
-                <Field label="Producto" hint={skuSel ? undefined : 'Escribe al menos una letra para buscar.'}>
-                    {skuSel ? (
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <span style={{ flex: 1, padding: '10px 12px', border: '1px solid var(--line)', borderRadius: 'var(--radius-md)', fontSize: 14, background: '#f8fafb' }}>
-                                {detalle.data?.nombre ?? skuSel} <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>{skuSel}</span>
-                            </span>
-                            <Button pequeno onClick={limpiar}>Cambiar</Button>
-                        </div>
-                    ) : (
-                        <>
-                            <input className="input" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar producto…" autoFocus />
-                            {busqueda.data && busqueda.data.items.length > 0 && (
-                                <div className="picker" style={{ marginTop: 6 }}>
-                                    {busqueda.data.items.map(p => (
-                                        <button key={p.sku} type="button" className="picker__item" onClick={() => seleccionarProducto(p)}>
-                                            <span>{p.nombre}</span>
-                                            <span className="picker__sku">{p.sku} · {p.stock_total} u.</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                            {busqueda.data?.items.length === 0 && q && (
-                                <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 6 }}>Sin resultados para {q}.</p>
-                            )}
-                        </>
-                    )}
-                </Field>
-
-                {detalle.data && (
-                    <Field label="Variante" hint="Selecciona la talla y color exactos.">
-                        {detalle.data.variantes.length === 0 ? (
-                            <Callout tono="warn">Este producto no tiene variantes. Agrégalas desde Inventario.</Callout>
-                        ) : (
-                            <div className="picker">
-                                {detalle.data.variantes.map(v => (
-                                    <button key={v.id} type="button" className="picker__item"
-                                        aria-pressed={varianteSel?.id === v.id}
-                                        onClick={() => setVarianteSel(v)}>
-                                        <span>{v.talla} · {v.color}</span>
-                                        <span className="picker__sku">{v.stock_actual} u. en stock</span>
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </Field>
-                )}
-
-                <div className="field-row">
-                    <Field label={tipo === 'AJUSTE' ? 'Stock real contado' : 'Cantidad'} hint={tipo === 'AJUSTE' ? 'El sistema calcula la diferencia.' : undefined}>
-                        <input className="input" type="number" min={tipo === 'AJUSTE' ? '0' : '1'}
-                            value={cantidad} onChange={e => setCantidad(e.target.value)} required />
-                    </Field>
-                    <Field label="Referencia" hint="Ej: Factura #123, Conteo físico…">
-                        <input className="input" value={referencia} onChange={e => setReferencia(e.target.value)}
-                            placeholder="Opcional" />
-                    </Field>
-                </div>
-
-                <div className="form__actions">
-                    <Button onClick={onCerrar}>Cancelar</Button>
-                    <Button type="submit" variante="primario" cargando={enviando}
-                        icono={<FaPlus style={{ fontSize: 11 }} />}>
-                        Registrar
-                    </Button>
-                </div>
-            </form>
-        </Modal>
-    );
-}
+// Casteo seguro para mapas de texto constantes
+const TEXTO_MAP = TEXTO as Record<string, string>;
 
 export default function KardexPage() {
     const [q, setQ] = useState('');
@@ -196,6 +43,7 @@ export default function KardexPage() {
     const [resultado, setResultado] = useState<ResultadoMovimiento | null>(null);
 
     const cambiarFiltro = (fn: () => void) => { fn(); setPage(1); };
+    const hayFiltros = !!(q || tipo || desde || hasta);
 
     const onGuardado = (r: ResultadoMovimiento) => {
         setModalNuevo(false);
@@ -204,114 +52,234 @@ export default function KardexPage() {
     };
 
     return (
-        <div className="page stack">
-            <PageHeader
-                titulo="Kardex"
-                descripcion="Historial de entradas, salidas y ajustes de stock"
-                acciones={
-                    <Button variante="primario" onClick={() => setModalNuevo(true)}
-                        icono={<FaPlus style={{ fontSize: 11 }} />}>
-                        Registrar movimiento
-                    </Button>
-                }
-            />
+        <div className="min-h-screen bg-slate-50">
+            <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
 
-            <Panel etiqueta="Movimientos">
-                <PanelHead titulo="Movimientos" descripcion={lista.data ? `${lista.data.total} registros` : undefined} />
-
-                {/* Filtros */}
-                <div className="toolbar" style={{ padding: '0 28px 16px' }}>
-                    <SearchInput valor={q} onCambio={v => cambiarFiltro(() => setQ(v))} placeholder="Buscar por SKU o nombre…" />
-                    <select className="select select--sm" value={tipo} onChange={e => cambiarFiltro(() => setTipo(e.target.value))}>
-                        <option value="">Todos los tipos</option>
-                        <option value="ENTRADA">Entradas</option>
-                        <option value="SALIDA">Salidas</option>
-                        <option value="AJUSTE">Ajustes</option>
-                    </select>
-                    <input className="input input--sm input--date" type="date" value={desde}
-                        max={hasta || hoy()} onChange={e => cambiarFiltro(() => setDesde(e.target.value))}
-                        title="Desde" aria-label="Desde" />
-                    <input className="input input--sm input--date" type="date" value={hasta}
-                        min={desde} max={hoy()} onChange={e => cambiarFiltro(() => setHasta(e.target.value))}
-                        title="Hasta" aria-label="Hasta" />
-                    {(q || tipo || desde || hasta) && (
-                        <Button pequeno variante="fantasma" onClick={() => { setQ(''); setTipo(''); setDesde(''); setHasta(''); setPage(1); }}>
-                            Limpiar
-                        </Button>
-                    )}
-                    <div className="toolbar__spacer" />
-                    <Button pequeno disabled={lista.loading} onClick={() => lista.refetch()}>Actualizar</Button>
+                {/* ── Header ── */}
+                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                    <div>
+                        <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1">Módulo Kardex</p>
+                        <h1 className="text-3xl font-black text-slate-900 leading-tight">Historial de Stock</h1>
+                        <p className="text-slate-500 text-sm mt-1.5 max-w-lg">
+                            Registro detallado de trazabilidad: entradas, salidas, ajustes y variaciones de inventario.
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => lista.refetch()}
+                            disabled={lista.loading}
+                            className="flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all cursor-pointer disabled:opacity-50 shadow-xs">
+                            <FaSync className={`text-slate-400 ${lista.loading ? 'animate-spin' : ''}`} />
+                            Actualizar
+                        </button>
+                        <button
+                            onClick={() => setModalNuevo(true)}
+                            className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/20">
+                            <FaPlus />
+                            Registrar movimiento
+                        </button>
+                    </div>
                 </div>
 
-                {/* Tabla */}
-                {lista.error ? (
-                    <ErrorState mensaje={lista.error} onReintentar={lista.refetch} />
-                ) : !lista.data ? (
-                    <TablaSkeleton filas={6} />
-                ) : lista.data.items.length === 0 ? (
-                    <EmptyState icono={<FaExchangeAlt />} titulo="Sin movimientos"
-                        texto={q || tipo || desde || hasta
-                            ? 'Ningún movimiento coincide con los filtros.'
-                            : 'Registra el primer movimiento con el botón de arriba.'} />
-                ) : (
-                    <>
-                        <div className="table-wrap">
-                            <table className="table">
-                                <thead>
-                                    <tr>
-                                        <th>Fecha</th>
-                                        <th>Producto</th>
-                                        <th>Tipo</th>
-                                        <th className="cell-num">Cantidad</th>
-                                        <th>Stock</th>
-                                        <th>Referencia</th>
-                                        <th>Usuario</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {lista.data.items.map(m => {
-                                        const subio = (m.stock_resultante ?? 0) >= (m.stock_anterior ?? 0);
-                                        return (
-                                            <tr key={m.id}>
-                                                <td className="muted" style={{ whiteSpace: 'nowrap', fontSize: 13 }}>
-                                                    {fechaLocal(m.fecha)}
-                                                </td>
-                                                <td>
-                                                    <div className="prod__name">{m.nombre ?? m.sku}</div>
-                                                    <div className="prod__sku">
-                                                        {m.sku}{m.talla || m.color ? ` · ${[m.talla, m.color].filter(Boolean).join(' / ')}` : ''}
-                                                    </div>
-                                                </td>
-                                                <td><Badge tono={TONO[m.tipo]}>{TEXTO[m.tipo]}</Badge></td>
-                                                <td className="cell-num">
-                                                    {m.tipo === 'ENTRADA' && <span className="mov-qty mov-qty--in">+{m.cantidad}</span>}
-                                                    {m.tipo === 'SALIDA' && <span className="mov-qty mov-qty--out">−{m.cantidad}</span>}
-                                                    {m.tipo === 'AJUSTE' && <span className="mov-qty mov-qty--adj">{subio ? '+' : '−'}{m.cantidad}</span>}
-                                                </td>
-                                                <td>
-                                                    {m.stock_anterior !== null && m.stock_resultante !== null ? (
-                                                        <span className="flow">
-                                                            {m.stock_anterior}
-                                                            <FaArrowRight style={{ fontSize: 9 }} />
-                                                            <strong>{m.stock_resultante}</strong>
-                                                        </span>
-                                                    ) : <span className="muted">—</span>}
-                                                </td>
-                                                <td style={{ maxWidth: 200, fontSize: 13 }}>
-                                                    {m.referencia || <span className="muted">—</span>}
-                                                </td>
-                                                <td className="muted" style={{ fontSize: 13 }}>{m.usuario ?? '—'}</td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                {/* ── Filtros ── */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-6 py-5">
+                    <div className="flex flex-col lg:flex-row gap-4 items-end">
+                        {/* Búsqueda */}
+                        <div className="flex-1 space-y-1.5 w-full">
+                            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                                <FaSearch className="text-indigo-400" />
+                                Buscar
+                            </label>
+                            <div className="relative">
+                                <FaSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300 text-xs" />
+                                <input
+                                    type="text"
+                                    value={q}
+                                    onChange={e => cambiarFiltro(() => setQ(e.target.value))}
+                                    placeholder="Buscar por SKU o nombre de producto…"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition placeholder:text-slate-300"
+                                />
+                            </div>
                         </div>
-                        <Pagination page={page} limit={LIMIT} total={lista.data.total} onPage={setPage} />
-                    </>
-                )}
-            </Panel>
 
+                        {/* Tipo Movimiento */}
+                        <div className="w-full lg:w-48 space-y-1.5">
+                            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                                <FaFilter className="text-indigo-400" />
+                                Tipo
+                            </label>
+                            <select
+                                value={tipo}
+                                onChange={e => cambiarFiltro(() => setTipo(e.target.value))}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer">
+                                <option value="">Todos los tipos</option>
+                                <option value="ENTRADA">Entradas</option>
+                                <option value="SALIDA">Salidas</option>
+                                <option value="AJUSTE">Ajustes</option>
+                            </select>
+                        </div>
+
+                        {/* Fecha Desde */}
+                        <div className="w-full lg:w-40 space-y-1.5">
+                            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                                <FaCalendarAlt className="text-indigo-400" />
+                                Desde
+                            </label>
+                            <input
+                                type="date"
+                                value={desde}
+                                max={hasta || hoy()}
+                                onChange={e => cambiarFiltro(() => setDesde(e.target.value))}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer"
+                            />
+                        </div>
+
+                        {/* Fecha Hasta */}
+                        <div className="w-full lg:w-40 space-y-1.5">
+                            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                                <FaCalendarAlt className="text-indigo-400" />
+                                Hasta
+                            </label>
+                            <input
+                                type="date"
+                                value={hasta}
+                                min={desde}
+                                max={hoy()}
+                                onChange={e => cambiarFiltro(() => setHasta(e.target.value))}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer"
+                            />
+                        </div>
+
+                        {hayFiltros && (
+                            <button
+                                onClick={() => { setQ(''); setTipo(''); setDesde(''); setHasta(''); setPage(1); }}
+                                className="px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600 bg-slate-50 border border-slate-200 rounded-xl transition-all cursor-pointer whitespace-nowrap">
+                                Limpiar filtros
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* ── Tabla ── */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                        <div>
+                            <h2 className="font-bold text-slate-900 text-sm">Movimientos de stock</h2>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                {lista.data ? `${lista.data.total} movimiento(s) registrado(s)` : 'Cargando…'}
+                            </p>
+                        </div>
+                        {hayFiltros && (
+                            <div className="flex gap-1.5">
+                                {q && (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold">
+                                        <FaSearch style={{ fontSize: 9 }} /> {q}
+                                    </span>
+                                )}
+                                {tipo && (
+                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-semibold ${TIPO_ESTILOS[tipo]?.bg} ${TIPO_ESTILOS[tipo]?.text} ${TIPO_ESTILOS[tipo]?.border}`}>
+                                        {TEXTO_MAP[tipo] ?? tipo}
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {lista.error ? (
+                        <div className="px-6 py-8">
+                            <ErrorState mensaje={lista.error} onReintentar={lista.refetch} />
+                        </div>
+                    ) : !lista.data ? (
+                        <div className="px-6 py-8"><TablaSkeleton filas={6} /></div>
+                    ) : lista.data.items.length === 0 ? (
+                        <div className="px-6 py-12">
+                            <EmptyState
+                                icono={<FaExchangeAlt />}
+                                titulo="Sin movimientos"
+                                texto={hayFiltros ? 'Ningún movimiento coincide con los filtros aplicados.' : 'Registra el primer movimiento con el botón de arriba.'}
+                                accion={hayFiltros
+                                    ? <button onClick={() => { setQ(''); setTipo(''); setDesde(''); setHasta(''); setPage(1); }}
+                                        className="mt-3 px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all cursor-pointer">
+                                        Limpiar filtros
+                                    </button>
+                                    : undefined}
+                            />
+                        </div>
+                    ) : (
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-slate-50 border-b border-slate-100">
+                                        <tr>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Fecha y Hora</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Producto / Variante</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Tipo</th>
+                                            <th className="px-5 py-3 text-right text-xs font-semibold text-slate-500">Cantidad</th>
+                                            <th className="px-5 py-3 text-center text-xs font-semibold text-slate-500">Variación stock</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Referencia</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Usuario</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {lista.data.items.map((m) => {
+                                            const subio = (m.stock_resultante ?? 0) >= (m.stock_anterior ?? 0);
+                                            const estiloTipo = TIPO_ESTILOS[m.tipo] ?? { bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200' };
+
+                                            return (
+                                                <tr key={m.id} className="hover:bg-slate-50/60 transition-colors">
+                                                    <td className="px-5 py-3.5 text-xs text-slate-500 font-mono whitespace-nowrap">
+                                                        {fechaLocal(m.fecha)}
+                                                    </td>
+                                                    <td className="px-5 py-3.5">
+                                                        <div className="font-semibold text-slate-800 leading-tight">{m.nombre ?? m.sku}</div>
+                                                        <div className="text-xs text-slate-400 font-mono mt-0.5">
+                                                            {m.sku}{m.talla || m.color ? ` · ${[m.talla, m.color].filter(Boolean).join(' / ')}` : ''}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-5 py-3.5">
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase tracking-wider ${estiloTipo.bg} ${estiloTipo.text} ${estiloTipo.border}`}>
+                                                            {TEXTO_MAP[m.tipo] ?? m.tipo}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-5 py-3.5 text-right font-bold tabular-nums">
+                                                        {m.tipo === 'ENTRADA' && <span className="text-emerald-600">+{m.cantidad}</span>}
+                                                        {m.tipo === 'SALIDA' && <span className="text-rose-600">−{m.cantidad}</span>}
+                                                        {m.tipo === 'AJUSTE' && <span className={subio ? 'text-emerald-600' : 'text-rose-600'}>{subio ? '+' : '−'}{m.cantidad}</span>}
+                                                    </td>
+                                                    <td className="px-5 py-3.5 text-center">
+                                                        {m.stock_anterior !== null && m.stock_resultante !== null ? (
+                                                            <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-100 text-xs font-semibold text-slate-700">
+                                                                <span className="text-slate-500">{m.stock_anterior}</span>
+                                                                <FaArrowRight className="text-[9px] text-slate-400" />
+                                                                <span className="font-bold text-slate-900">{m.stock_resultante}</span>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-slate-300">—</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-5 py-3.5 text-xs text-slate-600 max-w-xs truncate">
+                                                        {m.referencia || <span className="text-slate-300">—</span>}
+                                                    </td>
+                                                    <td className="px-5 py-3.5 text-xs font-medium text-slate-500">
+                                                        {m.usuario ?? '—'}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Paginación */}
+                            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+                                <Pagination page={page} limit={LIMIT} total={lista.data.total} onPage={setPage} />
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* ── Modales ── */}
             {modalNuevo && <MovimientoModal onGuardado={onGuardado} onCerrar={() => setModalNuevo(false)} />}
             {resultado && <ResultadoModal r={resultado} onCerrar={() => setResultado(null)} />}
         </div>

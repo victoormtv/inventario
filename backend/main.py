@@ -1,15 +1,24 @@
+from ast import List
+from typing import Optional
 import os
 import threading
 import time
 from typing import Annotated, Literal
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from dotenv import load_dotenv
 
 load_dotenv()
+app = FastAPI(title="API Sistema de Inventario", version="2.0")
 
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, StringConstraints, model_validator
+from ventas import router as ventas_router
+from exportar_pro import router as exportar_pro_router
+from typing import Optional
+from pydantic import BaseModel
 
 from alertas import correo_configurado, destinatarios, enviar_correo, notificar_cruce, productos_bajo_minimo
 from auth import (
@@ -26,7 +35,25 @@ from reportes import router as reportes_router, verificar_y_enviar_reporte_mensu
 from servicios import aplicar_movimiento, auditar
 from mercaderia import router as mercaderia_router
 
+from database import ALMACEN_ID, get_db, inicializar_bd, transaccion
+
+
+def cargar_seed():
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed.sql")
+    if not os.path.exists(ruta):
+        return
+    from database import conectar
+    conn = conectar()
+    try:
+        if conn.execute("SELECT COUNT(*) FROM variantes").fetchone()[0] == 0:
+            with open(ruta, encoding="utf-8") as f:
+                conn.executescript(f.read())
+    finally:
+        conn.close()
+
+
 inicializar_bd()
+cargar_seed()
 
 app = FastAPI(title="API Sistema de Inventario", version="2.0")
 
@@ -46,10 +73,15 @@ def iniciar_planificador():
     t.start()
 
 
-origenes = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origenes,
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -88,9 +120,10 @@ class VarianteIn(BaseModel):
 
 
 class VarianteEdit(BaseModel):
-    talla: Texto
     color: Texto
-
+    detalle: TextoOpcional = ""
+    kg: float | None = Field(default=None, ge=0)
+    lote: TextoOpcional = ""
 
 class MovimientoIn(BaseModel):
     id_variante: int
@@ -113,6 +146,59 @@ class ContactoIn(BaseModel):
     email: TextoOpcional = ""
     direccion: TextoOpcional = ""
 
+class UsuarioResponse(BaseModel):
+    id: int
+    usuario: str
+    nombre: Optional[str] = None
+    rol: Optional[str] = None
+
+
+class ProductoModel(BaseModel):
+    sku: str
+    nombre: str
+    categoria: Optional[str] = None
+    precio_costo: float
+    precio_venta: float
+    stock_minimo: int = 5
+
+
+class VarianteCreate(BaseModel):
+    talla: str
+    color: str
+    stock_inicial: int = 0
+    id_sucursal: int = 1
+
+
+class MovimientoKardexCreate(BaseModel):
+    id_variante: int
+    tipo_movimiento: str  # ENTRADA, SALIDA, AJUSTE
+    cantidad: int
+    referencia: Optional[str] = None
+    usuario: Optional[str] = "admin"
+    id_sucursal: int = 1
+
+
+class ItemVentaCreate(BaseModel):
+    id_variante: int
+    cantidad: int
+    precio_venta: float
+    unidad_medida: str = "NIU"
+    tipo_item: str = "bien"
+
+
+class VentaCreate(BaseModel):
+    tipo_comprobante: str  # 'boleta' o 'factura'
+    id_cliente: int
+    id_vendedor: Optional[int] = None
+    items: list[ItemVentaCreate]  # Usando list nativo de Python 3.9+
+
+
+class IngresoMercaderiaCreate(BaseModel):
+    id_variante: int
+    cantidad: int
+    precio_costo_unitario: float
+    referencia: Optional[str] = "Ingreso de mercadería"
+    id_proveedor: Optional[int] = None
 
 # ───────────────────────── Sesión ─────────────────────────
 @app.post("/api/auth/login")
@@ -175,6 +261,113 @@ def listar_productos(
     total = db.execute(f"SELECT COUNT(*) FROM ({sql})", params).fetchone()[0]
     filas = db.execute(
         sql + " ORDER BY p.nombre COLLATE NOCASE LIMIT ? OFFSET ?",
+        params + [limit, (page - 1) * limit],
+    ).fetchall()
+    return {"items": [dict(f) for f in filas], "total": total, "page": page, "limit": limit}
+
+@app.get("/api/usuarios", response_model=list[UsuarioResponse])
+def listar_usuarios():
+    db = get_db()
+    cursor = db.cursor()
+    # Retorna la lista de usuarios para el selector de vendedores
+    cursor.execute("SELECT id, usuario, rol FROM usuarios ORDER BY usuario ASC")
+    usuarios = [dict(row) for row in cursor.fetchall()]
+    db.close()
+    return usuarios
+
+@app.post("/api/ventas")
+def registrar_venta(venta: VentaCreate):
+    db = get_db()
+    cursor = db.cursor()
+    try:
+        # Calcular total y subtotal
+        total_venta = sum(item.cantidad * item.precio_venta for item in venta.items)
+        subtotal_venta = total_venta / 1.18
+        igv_total = total_venta - subtotal_venta
+
+        # Obtener nombre/código de usuario vendedor si se envió id_vendedor
+        vendedor_nombre = None
+        if venta.id_vendedor:
+            cursor.execute("SELECT usuario FROM usuarios WHERE id = ?", (venta.id_vendedor,))
+            usr = cursor.fetchone()
+            if usr:
+                vendedor_nombre = usr["usuario"]
+
+        # Insertar cabecera de la venta incluyendo id_vendedor y usuario
+        cursor.execute("""
+            INSERT INTO ventas (tipo_comprobante, id_cliente, id_vendedor, usuario, subtotal, total, igv_total)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (venta.tipo_comprobante, venta.id_cliente, venta.id_vendedor, vendedor_nombre, subtotal_venta, total_venta, igv_total))
+        
+        id_venta = cursor.lastrowid
+
+        # Insertar detalle de venta y descontar stock
+        for item in venta.items:
+            # Obtener datos de la variante y costo
+            cursor.execute("""
+                SELECT v.sku_producto, p.precio_costo 
+                FROM variantes v 
+                JOIN productos p ON v.sku_producto = p.sku 
+                WHERE v.id = ?
+            """, (item.id_variante,))
+            var_data = cursor.fetchone()
+            
+            if not var_data:
+                raise HTTPException(status_code=400, detail=f"Variante {item.id_variante} no encontrada")
+
+            ganancia = (item.precio_venta - var_data["precio_costo"]) * item.cantidad
+
+            cursor.execute("""
+                INSERT INTO ventas_detalle (id_venta, id_variante, sku_producto, cantidad, precio_costo, precio_venta, ganancia, unidad_medida, tipo_item)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (id_venta, item.id_variante, var_data["sku_producto"], item.cantidad, var_data["precio_costo"], item.precio_venta, ganancia, item.unidad_medida, item.tipo_item))
+
+            # Descontar stock en la variante
+            cursor.execute("UPDATE variantes SET stock_actual = stock_actual - ? WHERE id = ?", (item.cantidad, item.id_variante))
+
+        db.commit()
+        return {"mensaje": "Venta registrada exitosamente", "id_venta": id_venta}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        db.close()
+
+@router.get("/inventario/variantes")
+def listar_variantes_inventario(
+    q: str = "",
+    categoria: str = "",
+    estado: str = "",
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    db=Depends(get_db),
+):
+    """Devuelve una fila por variante, sin agrupar por producto."""
+    where, params = [], []
+    if q.strip():
+        like = f"%{q.strip()}%"
+        where.append("(p.sku LIKE ? OR p.nombre LIKE ? OR v.talla LIKE ? OR v.color LIKE ?)")
+        params += [like, like, like, like]
+    if categoria:
+        where.append("p.categoria = ?")
+        params.append(categoria)
+
+    cond = (" WHERE " + " AND ".join(where)) if where else ""
+    extra = ""
+    if estado == "bajo":
+        extra = (" AND " if cond else " WHERE ") + "v.stock_actual <= p.stock_minimo"
+
+    sql = f"""
+        SELECT v.id AS id_variante, p.sku, p.nombre, p.categoria,
+               p.precio_costo, p.precio_venta, p.stock_minimo,
+               v.talla, v.color, v.stock_actual
+        FROM variantes v
+        JOIN productos p ON p.sku = v.sku_producto
+        {cond}{extra}
+    """
+    total = db.execute(f"SELECT COUNT(*) FROM ({sql})", params).fetchone()[0]
+    filas = db.execute(
+        sql + " ORDER BY p.nombre COLLATE NOCASE, v.talla COLLATE NOCASE, v.color COLLATE NOCASE LIMIT ? OFFSET ?",
         params + [limit, (page - 1) * limit],
     ).fetchall()
     return {"items": [dict(f) for f in filas], "total": total, "page": page, "limit": limit}
@@ -273,19 +466,14 @@ def _variante_o_404(db, id_variante: int):
         raise HTTPException(404, "La variante no existe.")
     return v
 
-
 @router.put("/variantes/{id_variante}")
 def editar_variante(id_variante: int, v: VarianteEdit, db=Depends(get_db), usuario: str = Depends(usuario_actual)):
     with transaccion(db):
         actual = _variante_o_404(db, id_variante)
-        repetida = db.execute(
-            """SELECT 1 FROM variantes
-               WHERE sku_producto = ? AND id != ? AND lower(talla) = lower(?) AND lower(color) = lower(?)""",
-            (actual["sku_producto"], id_variante, v.talla, v.color),
-        ).fetchone()
-        if repetida:
-            raise HTTPException(409, f"Ya existe la variante {v.talla} / {v.color} para este producto.")
-        db.execute("UPDATE variantes SET talla = ?, color = ? WHERE id = ?", (v.talla, v.color, id_variante))
+        db.execute(
+            "UPDATE variantes SET color=?, detalle=?, kg=?, lote=? WHERE id=?",
+            (v.color, v.detalle or None, v.kg, v.lote or None, id_variante),
+        )
         auditar(db, usuario, f"Editó la variante {id_variante} de {actual['sku_producto']}")
     return {"id": id_variante}
 
@@ -372,21 +560,95 @@ def obtener_kpis(db=Depends(get_db)):
     alertas = productos_bajo_minimo(db)
 
     ganancia_diaria = db.execute(
-        """SELECT COALESCE(SUM(k.cantidad * (p.precio_venta - p.precio_costo)), 0)
-           FROM kardex k JOIN productos p ON p.sku = k.sku_producto
-           WHERE k.tipo_movimiento = 'SALIDA' AND date(k.fecha, 'localtime') = date('now', 'localtime')"""
+        """SELECT COALESCE(SUM(ganancia_total), 0) FROM ventas
+           WHERE date(fecha, 'localtime') = date('now', 'localtime')"""
+    ).fetchone()[0]
+    ganancia_semanal = db.execute(
+        """SELECT COALESCE(SUM(ganancia_total), 0) FROM ventas
+           WHERE date(fecha, 'localtime') >= date('now', 'localtime', '-6 days')"""
+    ).fetchone()[0]
+    ganancia_mensual = db.execute(
+        """SELECT COALESCE(SUM(ganancia_total), 0) FROM ventas
+           WHERE strftime('%Y-%m', fecha, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"""
+    ).fetchone()[0]
+
+    def top_producto(periodo_sql: str):
+        fila = db.execute(f"""
+            SELECT p.nombre, p.sku,
+                   COALESCE(SUM(vd.cantidad), 0) AS unidades_vendidas,
+                   COALESCE(SUM(vd.ganancia), 0) AS ganancia
+            FROM ventas_detalle vd
+            JOIN ventas v ON v.id = vd.id_venta
+            JOIN productos p ON p.sku = vd.sku_producto
+            WHERE {periodo_sql}
+            GROUP BY vd.sku_producto
+            ORDER BY unidades_vendidas DESC
+            LIMIT 1
+        """).fetchone()
+        if fila and fila["unidades_vendidas"] > 0:
+            return {"nombre": fila["nombre"], "sku": fila["sku"],
+                    "unidades": fila["unidades_vendidas"], "ganancia": round(fila["ganancia"], 2)}
+        return None
+
+    def ganancia_por_producto(periodo_sql: str):
+        filas = db.execute(f"""
+            SELECT p.nombre, p.sku,
+                   COALESCE(SUM(vd.ganancia), 0) AS ganancia,
+                   COALESCE(SUM(vd.cantidad), 0) AS unidades
+            FROM ventas_detalle vd
+            JOIN ventas v ON v.id = vd.id_venta
+            JOIN productos p ON p.sku = vd.sku_producto
+            WHERE {periodo_sql}
+            GROUP BY vd.sku_producto
+            ORDER BY ganancia DESC
+            LIMIT 5
+        """).fetchall()
+        return [{"nombre": f["nombre"], "sku": f["sku"],
+                 "ganancia": round(f["ganancia"], 2), "unidades": f["unidades"]} for f in filas]
+
+    hoy    = "date(v.fecha, 'localtime') = date('now', 'localtime')"
+    semana = "date(v.fecha, 'localtime') >= date('now', 'localtime', '-6 days')"
+    mes    = "strftime('%Y-%m', v.fecha, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"
+
+    return {
+        "total_productos": total_productos,
+        "unidades_totales": fila["unidades"],
+        "stock_valorizado": round(fila["valorizado"], 2),
+        "alertas_stock_bajo": len(alertas),
+        "detalle_alertas": alertas,
+        "ganancia_diaria": round(max(0, ganancia_diaria), 2),
+        "ganancia_semanal": round(max(0, ganancia_semanal), 2),
+        "ganancia_mensual": round(max(0, ganancia_mensual), 2),
+        "top_diario":   top_producto(hoy),
+        "top_semanal":  top_producto(semana),
+        "top_mensual":  top_producto(mes),
+        "ganancia_por_producto_diaria":  ganancia_por_producto(hoy),
+        "ganancia_por_producto_semanal": ganancia_por_producto(semana),
+        "ganancia_por_producto_mensual": ganancia_por_producto(mes),
+    }
+    
+def obtener_kpis(db=Depends(get_db)):
+    total_productos = db.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
+    fila = db.execute(
+        """SELECT COALESCE(SUM(v.stock_actual * p.precio_costo), 0) AS valorizado,
+                  COALESCE(SUM(v.stock_actual), 0) AS unidades
+           FROM variantes v JOIN productos p ON p.sku = v.sku_producto"""
+    ).fetchone()
+    alertas = productos_bajo_minimo(db)
+
+    ganancia_diaria = db.execute(
+        """SELECT COALESCE(SUM(ganancia_total), 0) FROM ventas
+           WHERE date(fecha, 'localtime') = date('now', 'localtime')"""
     ).fetchone()[0]
 
     ganancia_semanal = db.execute(
-        """SELECT COALESCE(SUM(k.cantidad * (p.precio_venta - p.precio_costo)), 0)
-           FROM kardex k JOIN productos p ON p.sku = k.sku_producto
-           WHERE k.tipo_movimiento = 'SALIDA' AND date(k.fecha, 'localtime') >= date('now', 'localtime', '-6 days')"""
+        """SELECT COALESCE(SUM(ganancia_total), 0) FROM ventas
+           WHERE date(fecha, 'localtime') >= date('now', 'localtime', '-6 days')"""
     ).fetchone()[0]
 
     ganancia_mensual = db.execute(
-        """SELECT COALESCE(SUM(k.cantidad * (p.precio_venta - p.precio_costo)), 0)
-           FROM kardex k JOIN productos p ON p.sku = k.sku_producto
-           WHERE k.tipo_movimiento = 'SALIDA' AND strftime('%Y-%m', k.fecha, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"""
+        """SELECT COALESCE(SUM(ganancia_total), 0) FROM ventas
+           WHERE strftime('%Y-%m', fecha, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"""
     ).fetchone()[0]
 
     return {
@@ -395,11 +657,10 @@ def obtener_kpis(db=Depends(get_db)):
         "stock_valorizado": round(fila["valorizado"], 2),
         "alertas_stock_bajo": len(alertas),
         "detalle_alertas": alertas,
-        "ganancia_diaria": round(ganancia_diaria, 2),
-        "ganancia_semanal": round(ganancia_semanal, 2),
-        "ganancia_mensual": round(ganancia_mensual, 2),
+        "ganancia_diaria": round(max(0, ganancia_diaria), 2),
+        "ganancia_semanal": round(max(0, ganancia_semanal), 2),
+        "ganancia_mensual": round(max(0, ganancia_mensual), 2),
     }
-
 
 @router.get("/alertas")
 def ver_alertas(db=Depends(get_db)):
@@ -499,6 +760,62 @@ def eliminar_contacto(id_contacto: int, db=Depends(get_db), usuario: str = Depen
     return {"id": id_contacto}
 
 
+
+# ───────────────────────── Consulta DNI / RUC (proxy apisperu.com) ─────────────────────────
+@router.get("/consultar-documento")
+def consultar_documento(numero: str, db=Depends(get_db)):
+    """Proxy hacia apisperu.com para consultar DNI (8 dígitos) o RUC (11 dígitos)."""
+    import httpx
+    numero = numero.strip()
+    token = os.environ.get("APISPERU_TOKEN", "")
+    if not token:
+        raise HTTPException(503, "La consulta de DNI/RUC no está configurada. Agrega APISPERU_TOKEN en el archivo .env y reinicia el servidor.")
+
+    if len(numero) == 8 and numero.isdigit():
+        url = f"https://dniruc.apisperu.com/api/v1/dni/{numero}?token={token}"
+        tipo = "dni"
+    elif len(numero) == 11 and numero.isdigit():
+        url = f"https://dniruc.apisperu.com/api/v1/ruc/{numero}?token={token}"
+        tipo = "ruc"
+    else:
+        raise HTTPException(400, "Ingresa un DNI de 8 dígitos o un RUC de 11 dígitos.")
+
+    try:
+        resp = httpx.get(url, timeout=10)
+    except Exception:
+        raise HTTPException(502, "No se pudo conectar con el servicio de consulta. Verifica tu conexión.")
+
+    if resp.status_code == 401:
+        raise HTTPException(502, "Token de APISPERU_TOKEN inválido o expirado.")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"El servicio respondió con error {resp.status_code}.")
+
+    datos = resp.json()
+    if not datos.get("success", True) and not datos.get("nombre") and not datos.get("razonSocial"):
+        raise HTTPException(404, f"No se encontró información para el {'DNI' if tipo == 'dni' else 'RUC'} {numero}.")
+
+    if tipo == "dni":
+        return {
+            "tipo": "dni",
+            "numero": numero,
+            "nombre": f"{datos.get('nombres', '')} {datos.get('apellidoPaterno', '')} {datos.get('apellidoMaterno', '')}".strip(),
+            "direccion": datos.get("direccion", ""),
+            "raw": datos,
+        }
+    else:
+        return {
+            "tipo": "ruc",
+            "numero": numero,
+            "nombre": datos.get("razonSocial", ""),
+            "direccion": datos.get("direccion", "") or datos.get("domicilioFiscal", ""),
+            "estado": datos.get("estado", ""),
+            "condicion": datos.get("condicion", ""),
+            "raw": datos,
+        }
+
+
 app.include_router(router)
 app.include_router(reportes_router)
 app.include_router(mercaderia_router)
+app.include_router(ventas_router)
+app.include_router(exportar_pro_router)

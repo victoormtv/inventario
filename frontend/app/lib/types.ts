@@ -25,6 +25,22 @@ export interface Variante {
     stock_actual: number;
 }
 
+export interface VarianteInventario {
+    id_variante: number;
+    sku: string;
+    nombre: string;
+    categoria: string | null;
+    precio_costo: number;
+    precio_venta: number;
+    stock_minimo: number;
+    talla: string;
+    color: string;
+    detalle: string | null;
+    kg: number | null;
+    lote: string | null;
+    stock_actual: number;
+}
+
 export interface ProductoDetalle {
     sku: string;
     nombre: string;
@@ -70,6 +86,20 @@ export interface AlertaStock {
     stock_minimo: number;
 }
 
+export interface TopProducto {
+    nombre: string;
+    sku: string;
+    unidades: number;
+    ganancia: number;
+}
+
+export interface GananciaPorProducto {
+    nombre: string;
+    sku: string;
+    ganancia: number;
+    unidades: number;
+}
+
 export interface KpiData {
     total_productos: number;
     unidades_totales: number;
@@ -79,6 +109,12 @@ export interface KpiData {
     ganancia_diaria?: number;
     ganancia_semanal?: number;
     ganancia_mensual?: number;
+    top_diario?: TopProducto | null;
+    top_semanal?: TopProducto | null;
+    top_mensual?: TopProducto | null;
+    ganancia_por_producto_diaria?: GananciaPorProducto[];
+    ganancia_por_producto_semanal?: GananciaPorProducto[];
+    ganancia_por_producto_mensual?: GananciaPorProducto[];
 }
 
 export interface EstadoAlertas {
@@ -137,4 +173,82 @@ export interface HistorialPrecio {
     proveedor: string | null;
     referencia: string | null;
     variacion_pct: number | null;
+}
+
+export interface ResultadoDocumento {
+    tipo: 'dni' | 'ruc';
+    numero: string;
+    nombre: string;
+    direccion: string;
+    estado?: string;
+    condicion?: string;
+}
+
+export type UnidadMedida =
+    | 'NIU' | 'ZZ' | 'PR' | 'DZN' | 'SET' | 'BX' | 'BG' | 'GLL'
+    | 'KGM' | 'LTR' | 'MTR' | 'MTK' | 'HLT';
+
+export const UNIDADES_MEDIDA: { codigo: UnidadMedida; etiqueta: string }[] = [
+    { codigo: 'NIU', etiqueta: 'UNIDAD' },
+    { codigo: 'PR', etiqueta: 'PAR' },
+    { codigo: 'DZN', etiqueta: 'DOCENA' },
+    { codigo: 'SET', etiqueta: 'JUEGO / SET' },
+    { codigo: 'BX', etiqueta: 'CAJA' },
+    { codigo: 'BG', etiqueta: 'BOLSA' },
+    { codigo: 'KGM', etiqueta: 'KILOGRAMO' },
+    { codigo: 'GLL', etiqueta: 'GALÓN' },
+    { codigo: 'LTR', etiqueta: 'LITRO' },
+    { codigo: 'MTR', etiqueta: 'METRO LINEAL' },
+    { codigo: 'MTK', etiqueta: 'METRO CUADRADO' },
+    { codigo: 'HLT', etiqueta: 'HECTOLITRO' },
+    { codigo: 'ZZ', etiqueta: 'SERVICIO' },
+];
+
+export interface ItemVenta {
+    sku_producto: string;
+    descripcion: string;
+    cantidad: number;
+    precio_costo: number;
+    precio_venta: number;
+    ganancia: number;
+    unidad_medida: UnidadMedida;
+    tipo_item: 'bien' | 'servicio';
+    valor_unitario: number;
+    igv: number;
+}
+
+export interface ResultadoVenta {
+    id: number;
+    tipo_comprobante: 'boleta' | 'factura';
+    serie: string;
+    numero: number;
+    id_cliente: number;
+    cliente_nombre: string;
+    cliente_documento: string | null;
+    cliente_direccion: string | null;
+    fecha: string;
+    subtotal: number;
+    descuento?: number;
+    total: number;
+    ganancia_total: number;
+    igv_total?: number;
+    metodo_pago?: string;
+    monto_pagado?: number;
+    vuelto?: number;
+    observaciones?: string;
+    usuario?: string;
+    estado: string;
+    items: ItemVenta[];
+}
+
+export interface VentaResumen {
+    id: number;
+    tipo_comprobante: 'boleta' | 'factura';
+    serie: string;
+    numero: number;
+    fecha: string;
+    total: number;
+    ganancia_total: number;
+    estado: string;
+    cliente_nombre: string;
 }

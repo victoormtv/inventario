@@ -1,14 +1,14 @@
 'use client';
 import { useState } from 'react';
 import { FaBoxOpen } from 'react-icons/fa';
-import { api } from '../lib/api';
-import { useApi } from '../lib/useApi';
-import type { Contacto, Paginado, ProductoDetalle, ProductoResumen, ResultadoIngreso } from '../lib/types';
-import Button from '../components/ui/Button';
-import ConfirmarModal from '../components/ui/ConfirmarModal';
-import { Callout, Field } from '../components/ui/Form';
-import Modal from '../components/Modal';
-import { useToast } from '../components/ui/Toast';
+import { api } from '../../lib/api';
+import { useApi } from '../../lib/useApi';
+import type { Contacto, Paginado, ProductoDetalle, ProductoResumen, ResultadoIngreso } from '../../lib/types';
+import Button from '../ui/Button';
+import ConfirmarModal from '../ui/ConfirmarModal';
+import { Callout, Field } from '../ui/Form';
+import Modal from '../Modal';
+import { useToast } from '../ui/Toast';
 
 interface FormIngreso {
     sku: string;
@@ -106,15 +106,24 @@ export default function IngresoMercaderiaModal({ onCerrar, onGuardado }: { onCer
                         </Field>
                     )}
 
-                    <Field label="Proveedor *">
-                        <select className="select" value={form.id_proveedor} onChange={set('id_proveedor')} required>
-                            <option value="">Selecciona un proveedor</option>
+                    <Field label="Proveedor *" hint="Escribe para buscar o filtrar entre los proveedores">
+                        <input
+                            className="input"
+                            list="lista-proveedores"
+                            value={proveedores?.items.find(c => c.id === Number(form.id_proveedor))?.nombre || ''}
+                            onChange={(e) => {
+                                const texto = e.target.value;
+                                const encontrado = proveedores?.items.find(c => c.nombre.toLowerCase() === texto.toLowerCase());
+                                setForm(f => ({ ...f, id_proveedor: encontrado ? String(encontrado.id) : '' }));
+                            }}
+                            placeholder="Busca o selecciona un proveedor..."
+                            required
+                        />
+                        <datalist id="lista-proveedores">
                             {proveedores?.items.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                    {c.nombre}
-                                </option>
+                                <option key={c.id} value={c.nombre} />
                             ))}
-                        </select>
+                        </datalist>
                     </Field>
 
                     <div className="field-row">

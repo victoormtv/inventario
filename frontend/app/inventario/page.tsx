@@ -1,10 +1,14 @@
 'use client';
 import { useState } from 'react';
-import { FaBoxOpen, FaChartLine, FaEdit, FaLayerGroup, FaPlus, FaSync, FaTrash } from 'react-icons/fa';
+import {
+    FaBoxOpen, FaChartLine, FaEdit, FaLayerGroup,
+    FaPlus, FaSync, FaTrash, FaSearch, FaFilter,
+    FaTag, FaRegCalendarCheck,
+} from 'react-icons/fa';
 import { api } from '../lib/api';
 import { moneda } from '../lib/format';
 import { useApi } from '../lib/useApi';
-import type { Paginado, ProductoDetalle, ProductoResumen, Variante } from '../lib/types';
+import type { Paginado, ProductoDetalle, ProductoResumen, Variante, VarianteInventario } from '../lib/types';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import ConfirmarModal from '../components/ui/ConfirmarModal';
@@ -16,97 +20,33 @@ import SearchInput from '../components/ui/SearchInput';
 import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
 import StockLevel from '../components/ui/StockLevel';
 import { useToast } from '../components/ui/Toast';
-import IngresoMercaderiaModal from './IngresoMercaderia';
-import HistorialPreciosModal from './HistorialPreciosModal';
+import IngresoMercaderiaModal from '../components/inventario/IngresoMercaderia';
+import HistorialPreciosModal from '../components/inventario/HistorialPreciosModal';
+import ProductoModal, { type VarianteEditable } from '../components/inventario/ProductoModal';
 
-interface FormProducto {
-    sku: string; nombre: string; categoria: string;
-    precio_costo: string; precio_venta: string; stock_minimo: string;
-}
 interface FormVariante { talla: string; color: string; stock_inicial: string; }
-
-const FORM_PROD_VACIO: FormProducto = { sku: '', nombre: '', categoria: '', precio_costo: '', precio_venta: '', stock_minimo: '5' };
 const FORM_VAR_VACIO: FormVariante = { talla: '', color: '', stock_inicial: '0' };
 
-function ProductoModal({ producto, onGuardado, onCerrar }: {
-    producto: ProductoResumen | null;
-    onGuardado: () => void; onCerrar: () => void;
-}) {
-    const toast = useToast();
-    const [form, setForm] = useState<FormProducto>(
-        producto
-            ? {
-                sku: producto.sku, nombre: producto.nombre, categoria: producto.categoria ?? '',
-                precio_costo: String(producto.precio_costo), precio_venta: String(producto.precio_venta),
-                stock_minimo: String(producto.stock_minimo)
-            }
-            : FORM_PROD_VACIO
-    );
-    const [error, setError] = useState<string | null>(null);
-    const [enviando, setEnviando] = useState(false);
-
-    const set = (k: keyof FormProducto) => (e: React.ChangeEvent<HTMLInputElement>) =>
-        setForm(f => ({ ...f, [k]: e.target.value }));
-
-    const guardar = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setEnviando(true); setError(null);
-        const body = {
-            nombre: form.nombre.trim(), categoria: form.categoria.trim(),
-            precio_costo: parseFloat(form.precio_costo), precio_venta: parseFloat(form.precio_venta),
-            stock_minimo: parseInt(form.stock_minimo),
-        };
-        try {
-            if (producto) {
-                await api(`/api/productos/${producto.sku}`, { method: 'PUT', json: body });
-                toast('Producto actualizado');
-            } else {
-                await api('/api/productos', { method: 'POST', json: { sku: form.sku.trim().toUpperCase(), ...body } });
-                toast('Producto registrado');
-            }
-            onGuardado();
-        } catch (err) { setError((err as Error).message); }
-        finally { setEnviando(false); }
-    };
-
-    return (
-        <Modal abierto onCerrar={onCerrar} titulo={producto ? 'Editar producto' : 'Nuevo producto'}
-            subtitulo={producto ? producto.sku : 'Los campos marcados con * son obligatorios'}>
-            <form className="form" onSubmit={guardar}>
-                {error && <Callout tono="danger">{error}</Callout>}
-                {!producto && (
-                    <Field label="SKU *" hint="Ej: POL-001. No se puede cambiar después.">
-                        <input className="input" value={form.sku} onChange={set('sku')} placeholder="POL-001" required />
-                    </Field>
-                )}
-                <Field label="Nombre *">
-                    <input className="input" value={form.nombre} onChange={set('nombre')} required autoFocus={!!producto} />
-                </Field>
-                <Field label="Categoría">
-                    <input className="input" value={form.categoria} onChange={set('categoria')} placeholder="Ej: Polos" />
-                </Field>
-                <div className="field-row">
-                    <Field label="Precio costo *">
-                        <input className="input" type="number" step="0.01" min="0" value={form.precio_costo} onChange={set('precio_costo')} required />
-                    </Field>
-                    <Field label="Precio venta *">
-                        <input className="input" type="number" step="0.01" min="0" value={form.precio_venta} onChange={set('precio_venta')} required />
-                    </Field>
-                </div>
-                <Field label="Stock mínimo" hint="Recibirás un aviso por correo cuando llegue a este nivel.">
-                    <input className="input" type="number" min="0" value={form.stock_minimo} onChange={set('stock_minimo')} required />
-                </Field>
-                <div className="form__actions">
-                    <Button onClick={onCerrar}>Cancelar</Button>
-                    <Button type="submit" variante="primario" cargando={enviando}>
-                        {producto ? 'Guardar cambios' : 'Registrar producto'}
-                    </Button>
-                </div>
-            </form>
-        </Modal>
-    );
+// ── Colores de categoría (mismo patrón que Reportes) ──────────────────────
+const CAT_COLOR: Record<string, { bg: string; text: string; border: string }> = {
+    Pegamentos: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' },
+    Fraguas: { bg: 'bg-teal-50', text: 'text-teal-700', border: 'border-teal-200' },
+    Accesorios: { bg: 'bg-violet-50', text: 'text-violet-700', border: 'border-violet-200' },
+};
+function catStyle(cat: string) {
+    return CAT_COLOR[cat] ?? { bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200' };
 }
 
+// ── Pill de stock (semáforo visual) ───────────────────────────────────────
+function StockPill({ stock, minimo }: { stock: number; minimo: number }) {
+    if (stock <= 0)
+        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-semibold bg-red-50 text-red-700 border-red-200">Sin stock</span>;
+    if (stock <= minimo)
+        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-semibold bg-amber-50 text-amber-700 border-amber-200">{stock} u.</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-semibold bg-emerald-50 text-emerald-700 border-emerald-200">{stock} u.</span>;
+}
+
+// ── Modal variantes (mismo estilo tarjeta) ────────────────────────────────
 function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }) {
     const toast = useToast();
     const { data, loading, refetch } = useApi<ProductoDetalle>(`/api/productos/${sku}`);
@@ -145,25 +85,35 @@ function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }
 
     return (
         <Modal abierto onCerrar={onCerrar} titulo="Variantes" subtitulo={`${data?.nombre ?? sku} · ${sku}`} ancho>
-            <div style={{ marginBottom: 24 }}>
+            <div className="mb-6">
                 {loading ? <TablaSkeleton filas={3} /> : !data?.variantes.length ? (
-                    <p style={{ color: 'var(--ink-2)', fontSize: 14 }}>Este producto todavía no tiene variantes.</p>
+                    <p className="text-sm text-slate-400">Este producto todavía no tiene variantes.</p>
                 ) : (
-                    <div className="table-wrap">
-                        <table className="table table--compact">
-                            <thead><tr><th>Talla</th><th>Color</th><th className="cell-num">Stock</th><th /></tr></thead>
-                            <tbody>
-                                {data.variantes.map(v => (
-                                    <tr key={v.id}>
-                                        <td style={{ fontWeight: 600 }}>{v.talla}</td>
-                                        <td>{v.color}</td>
-                                        <td className="cell-num">
-                                            <span className={v.stock_actual <= 0 ? 'stock-now' : ''}>{v.stock_actual}</span>
+                    <div className="rounded-xl border border-slate-200 overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 border-b border-slate-100">
+                                <tr>
+                                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500">Medida / peso</th>
+                                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500">Color</th>
+                                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-500">Stock</th>
+                                    <th className="px-4 py-2.5" />
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {data!.variantes.map(v => (
+                                    <tr key={v.id} className="hover:bg-slate-50/60 transition-colors">
+                                        <td className="px-4 py-3 font-semibold text-slate-800">{v.talla}</td>
+                                        <td className="px-4 py-3 text-slate-600">{v.color}</td>
+                                        <td className="px-4 py-3 text-right">
+                                            <StockPill stock={v.stock_actual} minimo={5} />
                                         </td>
-                                        <td className="table__actions">
-                                            <button className="icon-btn icon-btn--danger" disabled={eliminando === v.id}
-                                                onClick={() => eliminar(v)} title="Eliminar variante" aria-label="Eliminar">
-                                                <FaTrash style={{ fontSize: 12 }} />
+                                        <td className="px-4 py-3 text-right">
+                                            <button
+                                                disabled={eliminando === v.id}
+                                                onClick={() => eliminar(v)}
+                                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all cursor-pointer"
+                                                title="Eliminar variante">
+                                                <FaTrash style={{ fontSize: 11 }} />
                                             </button>
                                         </td>
                                     </tr>
@@ -174,13 +124,13 @@ function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }
                 )}
             </div>
 
-            <div style={{ borderTop: '1px solid var(--line-soft)', paddingTop: 20 }}>
-                <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>Agregar variante</p>
-                {error && <Callout tono="danger" >{error}</Callout>}
+            <div className="border-t border-slate-100 pt-5">
+                <p className="text-sm font-bold text-slate-800 mb-4">Agregar variante</p>
+                {error && <Callout tono="danger">{error}</Callout>}
                 <form className="form" onSubmit={agregar}>
-                    <div className="field-row field-row--3">
-                        <Field label="Talla *">
-                            <input className="input" value={form.talla} onChange={set('talla')} placeholder="M" required />
+                    <div className="grid grid-cols-3 gap-3">
+                        <Field label="Medida / peso *">
+                            <input className="input" value={form.talla} onChange={set('talla')} placeholder="Ej: 25 kg, Único" required />
                         </Field>
                         <Field label="Color *">
                             <input className="input" value={form.color} onChange={set('color')} placeholder="Negro" required />
@@ -189,7 +139,7 @@ function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }
                             <input className="input" type="number" min="0" value={form.stock_inicial} onChange={set('stock_inicial')} />
                         </Field>
                     </div>
-                    <div className="form__actions">
+                    <div className="form__actions mt-3">
                         <Button type="submit" variante="primario" cargando={enviando}
                             icono={<FaPlus style={{ fontSize: 11 }} />}>
                             Agregar
@@ -201,28 +151,29 @@ function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }
     );
 }
 
+// ── Página principal ──────────────────────────────────────────────────────
 export default function InventarioPage() {
     const toast = useToast();
     const [q, setQ] = useState('');
     const [categoria, setCategoria] = useState('');
     const [estado, setEstado] = useState('');
     const [page, setPage] = useState(1);
-    const LIMIT = 20;
+    const LIMIT = 50;
 
     const params = new URLSearchParams({ page: String(page), limit: String(LIMIT) });
     if (q) params.set('q', q);
     if (categoria) params.set('categoria', categoria);
     if (estado) params.set('estado', estado);
 
-    const lista = useApi<Paginado<ProductoResumen>>(`/api/productos?${params}`);
+    const lista = useApi<Paginado<VarianteInventario>>(`/api/inventario/variantes?${params}`);
     const cats = useApi<string[]>('/api/categorias');
 
-    const [modalProducto, setModalProducto] = useState<'nuevo' | ProductoResumen | null>(null);
+    const [modalProducto, setModalProducto] = useState<'nuevo' | { producto: ProductoResumen; variante: VarianteEditable } | null>(null);
     const [modalIngreso, setModalIngreso] = useState(false);
     const [modalVariantes, setModalVariantes] = useState<string | null>(null);
     const [confirmarEliminar, setConfirmarEliminar] = useState<ProductoResumen | null>(null);
     const [eliminando, setEliminando] = useState(false);
-    const [modalHistorial, setModalHistorial] = useState<ProductoResumen | null>(null);
+    const [modalHistorial, setModalHistorial] = useState<{ sku: string; nombre: string } | null>(null);
 
     const refetch = () => lista.refetch();
 
@@ -239,123 +190,244 @@ export default function InventarioPage() {
     };
 
     const cambiarFiltro = (fn: () => void) => { fn(); setPage(1); };
+    const hayFiltros = !!(q || categoria || estado);
 
     return (
-        <div className="page stack">
-            <PageHeader
-                titulo="Inventario"
-                descripcion="Productos y sus variantes por talla y color"
-                acciones={
-                    <>
-                        <Button onClick={refetch} disabled={lista.loading}
-                            icono={<FaSync className={lista.loading ? 'spin' : undefined} style={{ fontSize: 11 }} />}>
+        <div className="min-h-screen bg-slate-50">
+            <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
+
+                {/* ── Header ── */}
+                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                    <div>
+                        <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1">Módulo de Inventario</p>
+                        <h1 className="text-3xl font-black text-slate-900 leading-tight">Stock y variantes</h1>
+                        <p className="text-slate-500 text-sm mt-1.5 max-w-lg">
+                            Cada variante como ítem individual — talla, color, stock y precios en una sola vista.
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={refetch}
+                            disabled={lista.loading}
+                            className="flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all cursor-pointer disabled:opacity-50 shadow-xs">
+                            <FaSync className={`text-slate-400 ${lista.loading ? 'animate-spin' : ''}`} />
                             Actualizar
-                        </Button>
-                        <Button variante="primario" onClick={() => setModalProducto('nuevo')}
-                            icono={<FaPlus style={{ fontSize: 11 }} />}>
-                            Nuevo producto
-                        </Button>
-                        <Button onClick={() => setModalIngreso(true)} icono={<FaBoxOpen style={{ fontSize: 11 }} />}>
+                        </button>
+                        <button
+                            onClick={() => setModalIngreso(true)}
+                            className="flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all cursor-pointer shadow-xs">
+                            <FaBoxOpen className="text-slate-400" />
                             Ingreso de mercadería
-                        </Button>
-                    </>
-                }
-            />
-
-            <Panel etiqueta="Lista de productos">
-                <PanelHead titulo="Productos" descripcion={lista.data ? `${lista.data.total} en total` : undefined} />
-
-                {/* Barra de filtros */}
-                <div className="toolbar" style={{ padding: '0 28px 16px' }}>
-                    <SearchInput valor={q} onCambio={v => cambiarFiltro(() => setQ(v))} placeholder="Buscar por SKU o nombre…" />
-                    <select className="select select--sm" value={categoria}
-                        onChange={e => cambiarFiltro(() => setCategoria(e.target.value))}>
-                        <option value="">Todas las categorías</option>
-                        {(cats.data ?? []).map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <select className="select select--sm" value={estado}
-                        onChange={e => cambiarFiltro(() => setEstado(e.target.value))}>
-                        <option value="">Todos los estados</option>
-                        <option value="bajo">Solo bajo el mínimo</option>
-                    </select>
+                        </button>
+                        <button
+                            onClick={() => setModalProducto('nuevo')}
+                            className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/20">
+                            <FaPlus />
+                            Nuevo producto
+                        </button>
+                    </div>
                 </div>
 
-                {lista.error ? (
-                    <ErrorState mensaje={lista.error} onReintentar={refetch} />
-                ) : !lista.data ? (
-                    <TablaSkeleton />
-                ) : lista.data.items.length === 0 ? (
-                    <EmptyState icono={<FaBoxOpen />} titulo="Sin productos"
-                        texto={q || categoria || estado ? 'Ningún producto coincide con los filtros.' : 'Registra tu primer producto con el botón de arriba.'}
-                        accion={q || categoria || estado
-                            ? <Button onClick={() => { setQ(''); setCategoria(''); setEstado(''); setPage(1); }}>Limpiar filtros</Button>
-                            : undefined} />
-                ) : (
-                    <>
-                        <div className="table-wrap">
-                            <table className="table">
-                                <thead>
-                                    <tr>
-                                        <th>Producto</th>
-                                        <th>Categoría</th>
-                                        <th className="cell-num">Costo</th>
-                                        <th className="cell-num">Venta</th>
-                                        <th className="cell-num">Stock</th>
-                                        <th>Nivel</th>
-                                        <th />
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {lista.data.items.map(p => (
-                                        <tr key={p.sku}>
-                                            <td>
-                                                <div className="prod__name">{p.nombre}</div>
-                                                <div className="prod__sku">{p.sku}</div>
-                                            </td>
-                                            <td>
-                                                {p.categoria
-                                                    ? <Badge tono="neutral">{p.categoria}</Badge>
-                                                    : <span className="muted">—</span>}
-                                            </td>
-                                            <td className="cell-num muted">{moneda(p.precio_costo)}</td>
-                                            <td className="cell-num" style={{ fontWeight: 600 }}>{moneda(p.precio_venta)}</td>
-                                            <td className="cell-num">
-                                                <span className={p.stock_total <= p.stock_minimo ? 'stock-now' : ''}>
-                                                    {p.stock_total}
-                                                </span>
-                                            </td>
-                                            <td><StockLevel stock={p.stock_total} minimo={p.stock_minimo} /></td>
-                                            <td className="table__actions">
-                                                <button className="icon-btn" title="Variantes"
-                                                    onClick={() => setModalVariantes(p.sku)} aria-label="Ver variantes">
-                                                    <FaLayerGroup style={{ fontSize: 12 }} />
-                                                </button>
-                                                <button className="icon-btn" title="Historial de precios"
-                                                    onClick={() => setModalHistorial(p)} aria-label="Historial de precios">
-                                                    <FaChartLine style={{ fontSize: 12 }} />
-                                                </button>
-                                                <button className="icon-btn" title="Editar"
-                                                    onClick={() => setModalProducto(p)} aria-label="Editar producto">
-                                                    <FaEdit style={{ fontSize: 12 }} />
-                                                </button>
-                                                <button className="icon-btn icon-btn--danger" title="Eliminar"
-                                                    onClick={() => setConfirmarEliminar(p)} aria-label="Eliminar producto">
-                                                    <FaTrash style={{ fontSize: 12 }} />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                {/* ── Filtros ── */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-6 py-5">
+                    <div className="flex flex-col sm:flex-row gap-4 items-end">
+                        {/* Búsqueda */}
+                        <div className="flex-1 space-y-1.5">
+                            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                                <FaSearch className="text-indigo-400" />
+                                Buscar
+                            </label>
+                            <div className="relative">
+                                <FaSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300 text-xs" />
+                                <input
+                                    type="text"
+                                    value={q}
+                                    onChange={e => cambiarFiltro(() => setQ(e.target.value))}
+                                    placeholder="SKU, nombre, talla o color…"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition placeholder:text-slate-300"
+                                />
+                            </div>
                         </div>
-                        <Pagination page={page} limit={LIMIT} total={lista.data.total} onPage={setPage} />
-                    </>
-                )}
-            </Panel>
 
+                        {/* Categoría */}
+                        <div className="w-52 space-y-1.5">
+                            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                                <FaTag className="text-indigo-400" />
+                                Categoría
+                            </label>
+                            <select
+                                value={categoria}
+                                onChange={e => cambiarFiltro(() => setCategoria(e.target.value))}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer">
+                                <option value="">Todas las categorías</option>
+                                {(cats.data ?? []).map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </div>
+
+                        {/* Estado */}
+                        <div className="w-48 space-y-1.5">
+                            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                                <FaFilter className="text-indigo-400" />
+                                Estado
+                            </label>
+                            <select
+                                value={estado}
+                                onChange={e => cambiarFiltro(() => setEstado(e.target.value))}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer">
+                                <option value="">Todos</option>
+                                <option value="bajo">Solo bajo el mínimo</option>
+                            </select>
+                        </div>
+
+                        {hayFiltros && (
+                            <button
+                                onClick={() => { setQ(''); setCategoria(''); setEstado(''); setPage(1); }}
+                                className="px-3.5 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-600 bg-slate-50 border border-slate-200 rounded-xl transition-all cursor-pointer whitespace-nowrap">
+                                Limpiar filtros
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* ── Tabla ── */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+
+                    {/* Cabecera del panel */}
+                    <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                        <div>
+                            <h2 className="font-bold text-slate-900 text-sm">Variantes en inventario</h2>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                                {lista.data ? `${lista.data.total} en total` : 'Cargando…'}
+                            </p>
+                        </div>
+                        {hayFiltros && (
+                            <div className="flex gap-1.5">
+                                {q && (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold">
+                                        <FaSearch style={{ fontSize: 9 }} /> {q}
+                                    </span>
+                                )}
+                                {categoria && (
+                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-semibold ${catStyle(categoria).bg} ${catStyle(categoria).text} ${catStyle(categoria).border}`}>
+                                        {categoria}
+                                    </span>
+                                )}
+                                {estado === 'bajo' && (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
+                                        Bajo mínimo
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {lista.error ? (
+                        <div className="px-6 py-8">
+                            <ErrorState mensaje={lista.error} onReintentar={refetch} />
+                        </div>
+                    ) : !lista.data ? (
+                        <div className="px-6 py-8"><TablaSkeleton /></div>
+                    ) : lista.data.items.length === 0 ? (
+                        <div className="px-6 py-12">
+                            <EmptyState
+                                icono={<FaBoxOpen />}
+                                titulo="Sin variantes"
+                                texto={hayFiltros ? 'Ninguna variante coincide con los filtros.' : 'Registra tu primer producto con el botón de arriba.'}
+                                accion={hayFiltros
+                                    ? <button onClick={() => { setQ(''); setCategoria(''); setEstado(''); setPage(1); }}
+                                        className="mt-3 px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all cursor-pointer">
+                                        Limpiar filtros
+                                    </button>
+                                    : undefined}
+                            />
+                        </div>
+                    ) : (
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-slate-50 border-b border-slate-100">
+                                        <tr>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Producto</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Medida / peso</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Color</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Categoría</th>
+                                            <th className="px-5 py-3 text-right text-xs font-semibold text-slate-500">Costo</th>
+                                            <th className="px-5 py-3 text-right text-xs font-semibold text-slate-500">Venta</th>
+                                            <th className="px-5 py-3 text-right text-xs font-semibold text-slate-500">Stock</th>
+                                            <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Nivel</th>
+                                            <th className="px-5 py-3" />
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {lista.data.items.map((v) => {
+                                            const cs = catStyle(v.categoria ?? '');
+                                            return (
+                                                <tr key={v.id_variante} className="hover:bg-slate-50/60 transition-colors group">
+                                                    <td className="px-5 py-3.5">
+                                                        <div className="font-semibold text-slate-800 leading-tight">{v.nombre}</div>
+                                                        <div className="text-xs text-slate-400 font-mono mt-0.5">{v.sku}</div>
+                                                    </td>
+                                                    <td className="px-5 py-3.5 font-semibold text-slate-700">{v.talla}</td>
+                                                    <td className="px-5 py-3.5 text-slate-600">{v.color}</td>
+                                                    <td className="px-5 py-3.5">
+                                                        {v.categoria
+                                                            ? <span className={`... ${catStyle(v.categoria ?? '').bg} ...`}>{v.categoria}</span>
+                                                            : <span className="text-slate-300">—</span>}
+                                                    </td>
+                                                    <td className="px-5 py-3.5 text-right text-slate-400 font-medium tabular-nums">{moneda(v.precio_costo)}</td>
+                                                    <td className="px-5 py-3.5 text-right font-bold text-slate-800 tabular-nums">{moneda(v.precio_venta)}</td>
+                                                    <td className="px-5 py-3.5 text-right">
+                                                        <StockPill stock={v.stock_actual} minimo={v.stock_minimo} />
+                                                    </td>
+                                                    <td className="px-5 py-3.5">
+                                                        <StockLevel stock={v.stock_actual} minimo={v.stock_minimo} />
+                                                    </td>
+                                                    <td className="px-5 py-3.5">
+                                                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button
+                                                                onClick={() => setModalVariantes(v.sku)}
+                                                                title="Variantes del producto"
+                                                                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all cursor-pointer">
+                                                                <FaLayerGroup style={{ fontSize: 12 }} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setModalHistorial({ sku: v.sku, nombre: v.nombre })}
+                                                                title="Historial de precios"
+                                                                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all cursor-pointer">
+                                                                <FaChartLine style={{ fontSize: 12 }} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setModalProducto({
+                                                                    producto: { sku: v.sku, nombre: v.nombre, categoria: v.categoria, precio_costo: v.precio_costo, precio_venta: v.precio_venta, stock_minimo: v.stock_minimo, stock_total: 0, num_variantes: 0 },
+                                                                    variante: { id: v.id_variante, talla: v.talla, color: v.color, stock_actual: v.stock_actual },
+                                                                })}
+                                                                title="Editar producto"
+                                                                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all cursor-pointer">
+                                                                <FaEdit style={{ fontSize: 12 }} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* Footer con paginación */}
+                            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50">
+                                <Pagination page={page} limit={LIMIT} total={lista.data.total} onPage={setPage} />
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* ── Modales ── */}
             {modalProducto && (
                 <ProductoModal
-                    producto={modalProducto === 'nuevo' ? null : modalProducto}
+                    producto={modalProducto === 'nuevo' ? null : modalProducto.producto}
+                    variante={modalProducto === 'nuevo' ? null : modalProducto.variante}
                     onCerrar={() => setModalProducto(null)}
                     onGuardado={() => { setModalProducto(null); refetch(); }}
                 />
@@ -366,7 +438,6 @@ export default function InventarioPage() {
             {modalVariantes && (
                 <VariantesModal sku={modalVariantes} onCerrar={() => { setModalVariantes(null); refetch(); }} />
             )}
-
             {modalIngreso && (
                 <IngresoMercaderiaModal onCerrar={() => setModalIngreso(false)} onGuardado={() => { setModalIngreso(false); refetch(); }} />
             )}
