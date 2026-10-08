@@ -30,6 +30,7 @@ const TIPO_ESTILOS: Record<string, { bg: string; text: string; border: string }>
     AJUSTE: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
 };
 
+
 const TEXTO_MAP = TEXTO as Record<string, string>;
 
 export default function KardexPage() {
