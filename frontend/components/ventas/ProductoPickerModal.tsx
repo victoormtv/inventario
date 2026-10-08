@@ -37,7 +37,7 @@ export default function ProductoPickerModal({ onAgregar, onCerrar }: Props) {
                             <button type="button" className="picker-row__head" onClick={() => setSkuAbierto(skuAbierto === p.sku ? null : p.sku)}>
                                 <div>
                                     <div className="picker-row__nombre">{p.nombre}</div>
-                                    <div className="picker-row__sku">{p.sku} · costo {moneda(p.precio_costo)} · precio registrado {moneda(p.precio_venta)} · stock {p.stock_total}</div>
+                                    <div className="picker-row__sku">{p.sku} · stock {p.stock_total}</div>
                                 </div>
                             </button>
 
@@ -48,23 +48,28 @@ export default function ProductoPickerModal({ onAgregar, onCerrar }: Props) {
                                     ) : detalle.variantes.length === 0 ? (
                                         <p style={{ fontSize: 12, color: 'var(--ink-2)' }}>Sin variantes.</p>
                                     ) : (
-                                        detalle.variantes.map((v) => (
-                                            <div key={v.id} className="picker-variante">
-                                                <span>{v.talla} / {v.color}</span>
-                                                <span className={v.stock_actual <= 0 ? 'stock-now' : 'muted'}>stock: {v.stock_actual}</span>
-                                                <Button
-                                                    variante="primario"
-                                                    disabled={v.stock_actual <= 0}
-                                                    onClick={() => onAgregar({
-                                                        sku: p.sku, nombre: p.nombre, id_variante: v.id,
-                                                        talla: v.talla, color: v.color,
-                                                        precio_costo: p.precio_costo, precio_venta: p.precio_venta,
-                                                    })}
-                                                    icono={<FaPlus style={{ fontSize: 10 }} />}>
-                                                    Agregar
-                                                </Button>
-                                            </div>
-                                        ))
+                                        detalle.variantes.map((v) => {
+                                            const costo = v.precio_costo || p.precio_costo || 0;
+                                            const venta = v.precio_venta || p.precio_venta || 0;
+                                            return (
+                                                <div key={v.id} className="picker-variante">
+                                                    <span>{v.talla} / {v.color}</span>
+                                                    <span className="muted">costo {moneda(costo)} · venta {moneda(venta)}</span>
+                                                    <span className={v.stock_actual <= 0 ? 'stock-now' : 'muted'}>stock: {v.stock_actual}</span>
+                                                    <Button
+                                                        variante="primario"
+                                                        disabled={v.stock_actual <= 0}
+                                                        onClick={() => onAgregar({
+                                                            sku: p.sku, nombre: p.nombre, id_variante: v.id,
+                                                            talla: v.talla, color: v.color,
+                                                            precio_costo: costo, precio_venta: venta,
+                                                        })}
+                                                        icono={<FaPlus style={{ fontSize: 10 }} />}>
+                                                        Agregar
+                                                    </Button>
+                                                </div>
+                                            );
+                                        })
                                     )}
                                 </div>
                             )}

@@ -23,6 +23,8 @@ export interface Variante {
     talla: string;
     color: string;
     stock_actual: number;
+    precio_costo: number;
+    precio_venta: number;
 }
 
 export interface VarianteInventario {
