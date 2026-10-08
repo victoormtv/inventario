@@ -71,13 +71,8 @@ def migrar_bd():
         conn.close()
 
 
-inicializar_bd()
-cargar_seed()
-migrar_bd()
-
-# ── MODIFICACIÓN EN MAIN.PY PARA VERCEL ──
-
 app = FastAPI(title="API Sistema de Inventario", version="2.0")
+
 
 def _planificador_reporte_mensual():
     while True:
@@ -89,16 +84,32 @@ def _planificador_reporte_mensual():
 
 
 @app.on_event("startup")
-def iniciar_planificador():
-    # Desactivar hilos infinitos en Vercel (evita el congelamiento de serverless)
-    if os.environ.get("VERCEL") == "1":
-        return
-    t = threading.Thread(target=_planificador_reporte_mensual, daemon=True)
-    t.start()
+def startup_event():
+    # Inicialización diferida para evitar bloqueos en Vercel
+    try:
+        inicializar_bd()
+        cargar_seed()
+        migrar_bd()
+    except Exception:
+        pass
+
+    # Desactivar hilos infinitos en Vercel Serverless
+    if os.environ.get("VERCEL") != "1":
+        t = threading.Thread(target=_planificador_reporte_mensual, daemon=True)
+        t.start()
+
+
+# Configuración de CORS segura
+origins = [
+    "https://nathaninventario.online",
+    "https://www.nathaninventario.online",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins if os.environ.get("VERCEL") == "1" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -126,7 +137,6 @@ class ProductoIn(BaseModel):
 class ProductoEdit(BaseModel):
     nombre: Texto
     categoria: TextoOpcional = ""
-    # Opcionales: si no se envían, el producto conserva su precio base.
     precio_costo: float | None = Field(default=None, ge=0)
     precio_venta: float | None = Field(default=None, ge=0)
     stock_minimo: int = Field(ge=0)
@@ -185,13 +195,15 @@ class ItemVentaCreate(BaseModel):
 
 
 class VentaCreate(BaseModel):
-    tipo_comprobante: str  # 'boleta' o 'factura'
+    tipo_comprobante: str
     id_cliente: int
     id_vendedor: Optional[int] = None
     items: list[ItemVentaCreate]
 
 
-# ───────────────────────── Sesión ─────────────────────────
+# ───────────────────────── Rutas Públicas (Auth / Usuarios / Ventas) ─────────────────────────
+# Se mapean tanto /auth/login como /api/auth/login para evitar el 404 por /api/api/
+@app.post("/auth/login")
 @app.post("/api/auth/login")
 def login(datos: LoginIn, db=Depends(get_db)):
     clave = datos.usuario.strip().lower()
@@ -208,6 +220,7 @@ def login(datos: LoginIn, db=Depends(get_db)):
     return {"token": crear_token(fila["usuario"], fila["rol"]), "usuario": fila["usuario"], "rol": fila["rol"]}
 
 
+@app.get("/usuarios", response_model=list[UsuarioResponse])
 @app.get("/api/usuarios", response_model=list[UsuarioResponse])
 def listar_usuarios(db=Depends(get_db)):
     cursor = db.cursor()
@@ -215,6 +228,7 @@ def listar_usuarios(db=Depends(get_db)):
     return [dict(row) for row in cursor.fetchall()]
 
 
+@app.post("/ventas")
 @app.post("/api/ventas")
 def registrar_venta(venta: VentaCreate, db=Depends(get_db)):
     cursor = db.cursor()
@@ -235,7 +249,6 @@ def registrar_venta(venta: VentaCreate, db=Depends(get_db)):
             if usr:
                 vendedor_nombre = usr["usuario"]
 
-        # Correlativo por serie
         serie = "F001" if venta.tipo_comprobante == "factura" else "B001"
         cursor.execute("SELECT COALESCE(MAX(numero), 0) + 1 AS n FROM ventas WHERE serie = ?", (serie,))
         numero = cursor.fetchone()["n"]
@@ -300,7 +313,7 @@ def registrar_venta(venta: VentaCreate, db=Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# Todo lo demás exige sesión iniciada
+# ───────────────────────── Rutas Protegidas ─────────────────────────
 router = APIRouter(prefix="/api", dependencies=[Depends(usuario_actual)])
 
 
@@ -358,7 +371,6 @@ def listar_variantes_inventario(
     limit: int = Query(50, ge=1, le=500),
     db=Depends(get_db),
 ):
-    """Devuelve una fila por variante, sin agrupar por producto."""
     where, params = [], []
     if q.strip():
         like = f"%{q.strip()}%"
@@ -530,7 +542,7 @@ def registrar_movimiento(
     with transaccion(db):
         r = aplicar_movimiento(db, m.id_variante, m.tipo_movimiento, m.cantidad, m.referencia, usuario)
         auditar(db, usuario, f"{r['tipo']} de {r['cantidad']} u. en {r['sku']} (quedó en {r['stock_resultante']})")
-    fondo.add_task(notificar_cruce, r)  # el aviso sale después de responder
+    fondo.add_task(notificar_cruce, r)
     return r
 
 
@@ -757,7 +769,6 @@ def eliminar_contacto(id_contacto: int, db=Depends(get_db), usuario: str = Depen
 # ───────────────────────── Consulta DNI / RUC (proxy apisperu.com) ─────────────────────────
 @router.get("/consultar-documento")
 def consultar_documento(numero: str, db=Depends(get_db)):
-    """Proxy hacia apisperu.com para consultar DNI (8 dígitos) o RUC (11 dígitos)."""
     import httpx
     numero = numero.strip()
     token = os.environ.get("APISPERU_TOKEN", "")
