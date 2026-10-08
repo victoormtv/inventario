@@ -13,6 +13,8 @@ router = APIRouter(prefix="/api/ventas", dependencies=[Depends(usuario_actual)])
 SERIES = {"boleta": "B001", "factura": "F001"}
 IGV_TASA = 0.18
 TALLAS_NEUTRAS = {"", "-", "unico", "único", "unica", "única", "unidad"}
+# Roles que pueden editar / eliminar ventas
+ROLES_EDICION = {"admin"}
 
 
 class ItemVentaIn(BaseModel):
@@ -26,6 +28,7 @@ class ItemVentaIn(BaseModel):
 class VentaIn(BaseModel):
     tipo_comprobante: Literal["boleta", "factura"]
     id_cliente: int
+    id_vendedor: int | None = None
     items: list[ItemVentaIn] = Field(min_length=1)
     metodo_pago: str = Field(default="efectivo")
     monto_pagado: float | None = Field(default=None, ge=0)
@@ -34,10 +37,36 @@ class VentaIn(BaseModel):
     observaciones: str | None = None
 
 
+class ItemVentaEdit(BaseModel):
+    id_variante: int
+    cantidad: int = Field(gt=0)
+    precio_venta: float = Field(gt=0)
+
+
+class VentaEdit(BaseModel):
+    id_cliente: int | None = None
+    items: list[ItemVentaEdit] = Field(min_length=1)
+    metodo_pago: str | None = None
+    monto_pagado: float | None = Field(default=None, ge=0)
+    descuento: float = Field(default=0.0, ge=0)
+    observaciones: str | None = None
+
+
 def _siguiente_correlativo(db, serie: str) -> int:
     db.execute("INSERT OR IGNORE INTO correlativos (serie, ultimo) VALUES (?, 0)", (serie,))
     db.execute("UPDATE correlativos SET ultimo = ultimo + 1 WHERE serie = ?", (serie,))
     return db.execute("SELECT ultimo FROM correlativos WHERE serie = ?", (serie,)).fetchone()[0]
+
+
+def _exigir_rol(db, usuario: str):
+    fila = db.execute("SELECT rol FROM usuarios WHERE lower(usuario) = lower(?)", (usuario,)).fetchone()
+    if not fila or fila["rol"] not in ROLES_EDICION:
+        raise HTTPException(403, "Solo un administrador puede editar o eliminar ventas.")
+
+
+def _etiqueta(v) -> str:
+    serie = v["serie"] or SERIES.get(v["tipo_comprobante"], "")
+    return f"{serie}-{int(v['numero'] or v['id']):08d}"
 
 
 def _detalle_venta(db, id_venta: int) -> dict:
@@ -50,12 +79,28 @@ def _detalle_venta(db, id_venta: int) -> dict:
     if not v:
         raise HTTPException(404, "La venta no existe.")
     items = db.execute(
-        """SELECT sku_producto, sku_producto AS codigo, descripcion, cantidad, precio_costo, precio_venta, ganancia,
+        """SELECT id_variante, sku_producto, sku_producto AS codigo, descripcion, cantidad, precio_costo, precio_venta, ganancia,
                   unidad_medida, tipo_item, valor_unitario, igv
            FROM ventas_detalle WHERE id_venta = ?""",
         (id_venta,),
     ).fetchall()
     return {**dict(v), "items": [dict(i) for i in items]}
+
+
+def _descripcion_y_costo(db, id_variante: int, nombre: str):
+    var = db.execute(
+        """SELECT    COALESCE(NULLIF(v.precio_costo, 0), NULLIF(p.precio_costo, 0), 0) AS precio_costo
+           FROM variantes v JOIN productos p ON p.sku = v.sku_producto
+           WHERE v.id = ?""",
+        (id_variante,),
+    ).fetchone()
+    costo = (var["costo"] if var else 0) or 0
+    partes = [nombre]
+    if var and (var["talla"] or "").strip().lower() not in TALLAS_NEUTRAS:
+        partes.append(var["talla"].strip())
+    if var and (var["color"] or "").strip():
+        partes.append(var["color"].strip())
+    return " ".join(partes), costo
 
 
 @router.post("", status_code=201)
@@ -65,6 +110,13 @@ def crear_venta(v: VentaIn, db=Depends(get_db), usuario: str = Depends(usuario_a
         raise HTTPException(404, "El cliente no existe.")
     if v.tipo_comprobante == "factura" and (not cliente["documento"] or len(cliente["documento"]) != 11):
         raise HTTPException(400, "Para emitir factura el cliente debe tener RUC (11 dígitos) registrado.")
+
+    vendedor = usuario
+    if v.id_vendedor:
+        fila = db.execute("SELECT usuario FROM usuarios WHERE id = ?", (v.id_vendedor,)).fetchone()
+        if not fila:
+            raise HTTPException(404, "El vendedor no existe.")
+        vendedor = fila["usuario"]
 
     with transaccion(db):
         serie = SERIES[v.tipo_comprobante]
@@ -81,22 +133,7 @@ def crear_venta(v: VentaIn, db=Depends(get_db), usuario: str = Depends(usuario_a
                 db, item.id_variante, "SALIDA", item.cantidad,
                 f"Venta {etiqueta}", usuario,
             )
-
-            # Costo propio de la variante (si no tiene, el del producto) + medida y color
-            var = db.execute(
-                """SELECT COALESCE(v.precio_costo, p.precio_costo) AS costo, v.talla, v.color
-                   FROM variantes v JOIN productos p ON p.sku = v.sku_producto
-                   WHERE v.id = ?""",
-                (item.id_variante,),
-            ).fetchone()
-            costo = (var["costo"] if var else 0) or 0
-
-            partes = [r["nombre"]]
-            if var and (var["talla"] or "").strip().lower() not in TALLAS_NEUTRAS:
-                partes.append(var["talla"].strip())
-            if var and (var["color"] or "").strip():
-                partes.append(var["color"].strip())
-            descripcion = " ".join(partes)
+            descripcion, costo = _descripcion_y_costo(db, item.id_variante, r["nombre"])
 
             sub = item.cantidad * item.precio_venta
             gan = (item.precio_venta - costo) * item.cantidad
@@ -114,23 +151,12 @@ def crear_venta(v: VentaIn, db=Depends(get_db), usuario: str = Depends(usuario_a
 
         cur = db.execute(
             """INSERT INTO ventas
-               (tipo_comprobante, serie, numero, id_cliente, subtotal, descuento, total, ganancia_total, igv_total, metodo_pago, monto_pagado, vuelto, observaciones, usuario)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (tipo_comprobante, serie, numero, id_cliente, subtotal, descuento, total, ganancia_total, igv_total, metodo_pago, monto_pagado, vuelto, observaciones, usuario, id_vendedor)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                v.tipo_comprobante,
-                serie,
-                numero,
-                v.id_cliente,
-                subtotal,
-                v.descuento,
-                total_final,
-                ganancia_neta,
-                round(igv_total, 2),
-                v.metodo_pago,
-                monto_recibido,
-                vuelto_calculado,
-                v.observaciones,
-                usuario,
+                v.tipo_comprobante, serie, numero, v.id_cliente, subtotal, v.descuento,
+                total_final, ganancia_neta, round(igv_total, 2), v.metodo_pago,
+                monto_recibido, vuelto_calculado, v.observaciones, vendedor, v.id_vendedor,
             ),
         )
         id_venta = cur.lastrowid
@@ -148,6 +174,111 @@ def crear_venta(v: VentaIn, db=Depends(get_db), usuario: str = Depends(usuario_a
         auditar(db, usuario, f"Emitió {etiqueta} a {cliente['nombre']} por S/ {total_final:.2f} ({v.metodo_pago})")
 
     return _detalle_venta(db, id_venta)
+
+
+@router.put("/{id_venta}")
+def editar_venta(id_venta: int, e: VentaEdit, db=Depends(get_db), usuario: str = Depends(usuario_actual)):
+    ids = [i.id_variante for i in e.items]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(400, "Hay una variante repetida en la venta.")
+
+    with transaccion(db):
+        _exigir_rol(db, usuario)
+        venta = db.execute("SELECT * FROM ventas WHERE id = ?", (id_venta,)).fetchone()
+        if not venta:
+            raise HTTPException(404, "La venta no existe.")
+        etiqueta = _etiqueta(venta)
+
+        if e.id_cliente is not None:
+            cli = db.execute("SELECT * FROM terceros WHERE id = ?", (e.id_cliente,)).fetchone()
+            if not cli:
+                raise HTTPException(404, "El cliente no existe.")
+            if venta["tipo_comprobante"] == "factura" and len(cli["documento"] or "") != 11:
+                raise HTTPException(400, "Para factura el cliente debe tener RUC (11 dígitos).")
+
+        viejos = {
+            r["id_variante"]: r
+            for r in db.execute("SELECT * FROM ventas_detalle WHERE id_venta = ?", (id_venta,)).fetchall()
+            if r["id_variante"] is not None
+        }
+        nuevos = {i.id_variante: i for i in e.items}
+
+        # Ajuste de stock solo por la diferencia de cada variante
+        nombres = {}
+        for vid in set(viejos) | set(nuevos):
+            delta = (nuevos[vid].cantidad if vid in nuevos else 0) - (viejos[vid]["cantidad"] if vid in viejos else 0)
+            ref = f"Edición {etiqueta}"
+            if delta < 0:
+                aplicar_movimiento(db, vid, "ENTRADA", -delta, ref, usuario)
+        for vid in set(viejos) | set(nuevos):
+            delta = (nuevos[vid].cantidad if vid in nuevos else 0) - (viejos[vid]["cantidad"] if vid in viejos else 0)
+            if delta > 0:
+                r = aplicar_movimiento(db, vid, "SALIDA", delta, f"Edición {etiqueta}", usuario)
+                nombres[vid] = (r["sku"], r["nombre"])
+
+        db.execute("DELETE FROM ventas_detalle WHERE id_venta = ?", (id_venta,))
+
+        subtotal = ganancia_total = igv_total = 0.0
+        for item in e.items:
+            if item.id_variante in viejos:
+                o = viejos[item.id_variante]
+                sku, descripcion, costo = o["sku_producto"], o["descripcion"], o["precio_costo"] or 0
+                unidad, tipo = o["unidad_medida"] or "NIU", o["tipo_item"] or "bien"
+            else:
+                sku, nombre = nombres[item.id_variante]
+                descripcion, costo = _descripcion_y_costo(db, item.id_variante, nombre)
+                unidad, tipo = "NIU", "bien"
+
+            gan = (item.precio_venta - costo) * item.cantidad
+            valor_unitario = round(item.precio_venta / (1 + IGV_TASA), 4)
+            igv_linea = round((item.precio_venta - valor_unitario) * item.cantidad, 2)
+            subtotal += item.cantidad * item.precio_venta
+            ganancia_total += gan
+            igv_total += igv_linea
+            db.execute(
+                """INSERT INTO ventas_detalle
+                   (id_venta, id_variante, sku_producto, descripcion, cantidad, precio_costo, precio_venta, ganancia,
+                    unidad_medida, tipo_item, valor_unitario, igv)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (id_venta, item.id_variante, sku, descripcion, item.cantidad, costo, item.precio_venta, gan,
+                 unidad, tipo, valor_unitario, igv_linea),
+            )
+
+        total_final = max(0.0, subtotal - e.descuento)
+        ganancia_neta = max(0.0, ganancia_total - e.descuento)
+        monto = e.monto_pagado if e.monto_pagado is not None else total_final
+        vuelto = max(0.0, monto - total_final)
+
+        db.execute(
+            """UPDATE ventas SET id_cliente = COALESCE(?, id_cliente), subtotal = ?, descuento = ?, total = ?,
+                      ganancia_total = ?, igv_total = ?, metodo_pago = COALESCE(?, metodo_pago),
+                      monto_pagado = ?, vuelto = ?, observaciones = ?
+               WHERE id = ?""",
+            (e.id_cliente, subtotal, e.descuento, total_final, ganancia_neta, round(igv_total, 2),
+             e.metodo_pago, monto, vuelto, e.observaciones, id_venta),
+        )
+        auditar(db, usuario, f"Editó {etiqueta}: total {venta['total']:.2f} -> {total_final:.2f}")
+
+    return _detalle_venta(db, id_venta)
+
+
+@router.delete("/{id_venta}")
+def eliminar_venta(id_venta: int, db=Depends(get_db), usuario: str = Depends(usuario_actual)):
+    with transaccion(db):
+        _exigir_rol(db, usuario)
+        venta = db.execute("SELECT * FROM ventas WHERE id = ?", (id_venta,)).fetchone()
+        if not venta:
+            raise HTTPException(404, "La venta no existe.")
+        etiqueta = _etiqueta(venta)
+
+        for d in db.execute("SELECT * FROM ventas_detalle WHERE id_venta = ?", (id_venta,)).fetchall():
+            if d["id_variante"] is not None:
+                aplicar_movimiento(db, d["id_variante"], "ENTRADA", d["cantidad"], f"Anulación {etiqueta}", usuario)
+
+        db.execute("DELETE FROM ventas_detalle WHERE id_venta = ?", (id_venta,))
+        db.execute("DELETE FROM ventas WHERE id = ?", (id_venta,))
+        auditar(db, usuario, f"Eliminó {etiqueta} por S/ {venta['total']:.2f} y devolvió el stock")
+    return {"id": id_venta}
 
 
 @router.get("/{id_venta}")

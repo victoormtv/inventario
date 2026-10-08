@@ -1,7 +1,6 @@
 import os
 from contextlib import contextmanager
-
-import libsql
+import libsql_client
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -126,12 +125,13 @@ class Conexion:
             pass
 
 
-def conectar() -> Conexion:
-    if TURSO_URL:
-        raw = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
-    else:
-        raw = libsql.connect(DB_PATH)
-    return Conexion(raw)
+def conectar():
+    if TURSO_URL and TURSO_TOKEN:
+        # Usa create_client_sync en lugar de connect
+        return libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
+    # Conexión local a SQLite si no hay credenciales
+    import sqlite3
+    return sqlite3.connect("inventario.db")
 
 
 def get_db():

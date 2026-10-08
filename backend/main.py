@@ -49,6 +49,8 @@ def _agregar_columna(conn, tabla: str, columna: str, tipo: str):
 
 
 def migrar_bd():
+    if os.environ.get("TURSO_DATABASE_URL") and os.environ.get("INIT_DB") != "1":
+        return
     """Precio por variante + columnas usadas por comprobantes. Se puede correr muchas veces."""
     conn = conectar()
     try:
@@ -239,92 +241,6 @@ def listar_usuarios(db=Depends(get_db)):
     cursor = db.cursor()
     cursor.execute("SELECT id, usuario, nombre, rol FROM usuarios ORDER BY usuario ASC")
     return [dict(row) for row in cursor.fetchall()]
-
-
-@app.post("/ventas")
-@app.post("/api/ventas")
-def registrar_venta(venta: VentaCreate, db=Depends(get_db)):
-    cursor = db.cursor()
-    try:
-        if venta.tipo_comprobante not in ("boleta", "factura"):
-            raise HTTPException(status_code=400, detail="Tipo de comprobante inválido.")
-        if not venta.items:
-            raise HTTPException(status_code=400, detail="La venta no tiene ítems.")
-
-        total_venta = sum(item.cantidad * item.precio_venta for item in venta.items)
-        subtotal_venta = total_venta / 1.18
-        igv_total = total_venta - subtotal_venta
-
-        vendedor_nombre = None
-        if venta.id_vendedor:
-            cursor.execute("SELECT usuario FROM usuarios WHERE id = ?", (venta.id_vendedor,))
-            usr = cursor.fetchone()
-            if usr:
-                vendedor_nombre = usr["usuario"]
-
-        serie = "F001" if venta.tipo_comprobante == "factura" else "B001"
-        cursor.execute("SELECT COALESCE(MAX(numero), 0) + 1 AS n FROM ventas WHERE serie = ?", (serie,))
-        numero = cursor.fetchone()["n"]
-
-        cursor.execute(
-            """
-            INSERT INTO ventas (tipo_comprobante, serie, numero, id_cliente, id_vendedor, usuario,
-                                subtotal, total, igv_total, ganancia_total)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-            """,
-            (venta.tipo_comprobante, serie, numero, venta.id_cliente, venta.id_vendedor,
-             vendedor_nombre, subtotal_venta, total_venta, igv_total),
-        )
-        id_venta = cursor.lastrowid
-
-        ganancia_total = 0.0
-        for item in venta.items:
-            cursor.execute(
-                """
-                SELECT v.sku_producto, COALESCE(v.precio_costo, p.precio_costo) AS precio_costo
-                FROM variantes v
-                JOIN productos p ON v.sku_producto = p.sku
-                WHERE v.id = ?
-                """,
-                (item.id_variante,),
-            )
-            var_data = cursor.fetchone()
-            if not var_data:
-                raise HTTPException(status_code=400, detail=f"Variante {item.id_variante} no encontrada")
-
-            ganancia = (item.precio_venta - var_data["precio_costo"]) * item.cantidad
-            ganancia_total += ganancia
-
-            cursor.execute(
-                """
-                INSERT INTO ventas_detalle (id_venta, id_variante, sku_producto, cantidad, precio_costo,
-                                            precio_venta, ganancia, unidad_medida, tipo_item)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (id_venta, item.id_variante, var_data["sku_producto"], item.cantidad,
-                 var_data["precio_costo"], item.precio_venta, ganancia, item.unidad_medida, item.tipo_item),
-            )
-            cursor.execute(
-                "UPDATE variantes SET stock_actual = stock_actual - ? WHERE id = ?",
-                (item.cantidad, item.id_variante),
-            )
-
-        cursor.execute("UPDATE ventas SET ganancia_total = ? WHERE id = ?", (ganancia_total, id_venta))
-
-        db.commit()
-        return {
-            "mensaje": "Venta registrada exitosamente",
-            "id_venta": id_venta,
-            "serie": serie,
-            "numero": numero,
-        }
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-
 
 # ───────────────────────── Rutas Protegidas ─────────────────────────
 router = APIRouter(prefix="/api", dependencies=[Depends(usuario_actual)])
@@ -827,15 +743,6 @@ def consultar_documento(numero: str, db=Depends(get_db)):
         "estado": datos.get("estado", ""),
         "condicion": datos.get("condicion", ""),
         "raw": datos,
-    }
-
-@app.get("/api/debug")
-def debug(db=Depends(get_db)):
-    return {
-        "admin_password_set": bool(os.environ.get("ADMIN_PASSWORD")),
-        "secret_set": bool(os.environ.get("INVENTARIO_SECRET")),
-        "vercel": os.environ.get("VERCEL"),
-        "usuarios": [r["usuario"] for r in db.execute("SELECT usuario FROM usuarios")],
     }
 
 app.include_router(router)

@@ -2,25 +2,37 @@
 import { useState } from 'react';
 import {
     FaChartLine, FaEye, FaPlus, FaSearch, FaSync,
-    FaFileInvoice, FaDollarSign, FaCoins,
+    FaFileInvoice, FaDollarSign, FaCoins, FaEdit, FaTrash,
 } from 'react-icons/fa';
 import { moneda } from '@/lib/format';
 import type { Paginado, ResultadoVenta } from '@/types';
-import Button from '@/components/ui/Button';
 import ComprobanteImprimible from '@/components/ventas/ComprobanteImprimible';
 import NuevaVentaModal from '@/components/ventas/NuevaVentaModal';
+import EditarVentaModal from '@/components/ventas/EditarVentaModal';
+import ConfirmarModal from '@/components/ui/ConfirmarModal';
+import { useToast } from '@/components/ui/Toast';
+import { api, ApiError } from '@/lib/api';
 import { useApi } from '@/hooks/useApi';
 import { useRouter } from 'next/navigation';
 import { EmptyState, ErrorState, TablaSkeleton } from '@/components/ui/States';
+
+// La BD guarda la fecha en UTC sin zona; se muestra en hora de Lima.
+const fechaLima = (f: string) =>
+    new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(f) ? f : f.replace(' ', 'T') + 'Z')
+        .toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Lima' });
 
 const numeroComprobante = (v: ResultadoVenta) =>
     `${v.serie || (v.tipo_comprobante === 'factura' ? 'F001' : 'B001')}-${String(v.numero ?? v.id).padStart(8, '0')}`;
 
 export default function VentasPage() {
     const router = useRouter();
+    const toast = useToast();
     const [busqueda, setBusqueda] = useState('');
     const [modalAbierto, setModalAbierto] = useState(false);
     const [ventaEmitida, setVentaEmitida] = useState<ResultadoVenta | null>(null);
+    const [editandoId, setEditandoId] = useState<number | null>(null);
+    const [aEliminar, setAEliminar] = useState<ResultadoVenta | null>(null);
+    const [eliminando, setEliminando] = useState(false);
 
     const { data: ventasPaginadas, loading: cargandoVentas, error: errorVentas, refetch: recargarVentas } = useApi<Paginado<ResultadoVenta>>('/api/ventas?limit=100');
 
@@ -32,6 +44,21 @@ export default function VentasPage() {
     const totalRecaudado = ventasFiltradas.reduce((acc, v) => acc + (v.total || 0), 0);
     const totalGanancia = ventasFiltradas.reduce((acc, v) => acc + (v.ganancia_total || 0), 0);
     const cantidadVentas = ventasFiltradas.length;
+
+    const eliminarVenta = async () => {
+        if (!aEliminar) return;
+        setEliminando(true);
+        try {
+            await api(`/api/ventas/${aEliminar.id}`, { method: 'DELETE' });
+            toast('Venta eliminada y stock devuelto');
+            recargarVentas();
+        } catch (e) {
+            toast(e instanceof ApiError ? e.message : 'No se pudo eliminar la venta', 'error');
+        } finally {
+            setEliminando(false);
+            setAEliminar(null);
+        }
+    };
 
     return (
         <div className="min-h-screen bg-slate-50">
@@ -195,7 +222,7 @@ export default function VentasPage() {
                                                 </div>
                                             </td>
                                             <td className="px-5 py-3.5 text-slate-500 text-xs">
-                                                {new Date(v.fecha).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}
+                                                {fechaLima(v.fecha)}
                                             </td>
                                             <td className="px-5 py-3.5 font-medium text-slate-700">
                                                 {v.cliente_nombre || 'Cliente General'}
@@ -207,12 +234,26 @@ export default function VentasPage() {
                                                 {moneda(v.ganancia_total)}
                                             </td>
                                             <td className="px-5 py-3.5 text-right">
-                                                <button
-                                                    onClick={() => router.push(`/ventas/${v.id}`)}
-                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-all cursor-pointer">
-                                                    <FaEye style={{ fontSize: 11 }} />
-                                                    Ver detalle
-                                                </button>
+                                                <div className="inline-flex items-center gap-1.5">
+                                                    <button
+                                                        onClick={() => router.push(`/ventas/${v.id}`)}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-all cursor-pointer">
+                                                        <FaEye style={{ fontSize: 11 }} />
+                                                        Ver
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setEditandoId(v.id)}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-all cursor-pointer">
+                                                        <FaEdit style={{ fontSize: 11 }} />
+                                                        Editar
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setAEliminar(v)}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition-all cursor-pointer">
+                                                        <FaTrash style={{ fontSize: 11 }} />
+                                                        Eliminar
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -233,6 +274,24 @@ export default function VentasPage() {
             )}
 
             {ventaEmitida && <ComprobanteImprimible venta={ventaEmitida} onCerrar={() => setVentaEmitida(null)} />}
+
+            {editandoId !== null && (
+                <EditarVentaModal
+                    idVenta={editandoId}
+                    onCerrar={() => setEditandoId(null)}
+                    onGuardada={() => { setEditandoId(null); recargarVentas(); }}
+                />
+            )}
+
+            <ConfirmarModal
+                abierto={aEliminar !== null}
+                titulo="Eliminar venta"
+                texto={`¿Eliminar ${aEliminar ? numeroComprobante(aEliminar) : ''} por ${aEliminar ? moneda(aEliminar.total) : ''}? Se devuelve el stock y no se puede deshacer.`}
+                textoConfirmar="Sí, eliminar"
+                cargando={eliminando}
+                onConfirmar={eliminarVenta}
+                onCancelar={() => setAEliminar(null)}
+            />
         </div>
     );
 }
