@@ -5,7 +5,6 @@ import { useSesion } from '@/lib/session';
 import ThemeToggle from '@/components/ThemeToggle';
 import Sidebar from './Sidebar';
 
-/** Decide qué se ve según haya sesión: login sin menú, o app con menú. */
 export default function AppShell({ children }: { children: ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
@@ -30,7 +29,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         );
     }
 
-    if (!sesion) return null; // mientras redirige al login
+    if (!sesion) return null;
 
     return (
         <div className="app">

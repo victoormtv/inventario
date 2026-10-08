@@ -34,7 +34,6 @@ SECRETO = _cargar_secreto()
 _bearer = HTTPBearer(auto_error=False)
 
 
-# ───────── Contraseñas ─────────
 def hashear(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -42,16 +41,13 @@ def hashear(password: str) -> str:
 def verificar(password: str, hash_guardado: str) -> bool:
     try:
         return bcrypt.checkpw(password.encode("utf-8"), hash_guardado.encode("utf-8"))
-    except ValueError:  # p. ej. contraseña de más de 72 bytes
+    except ValueError:
         return False
 
 
-# Se compara contra este hash cuando el usuario no existe, para que responder
-# "usuario inválido" tarde lo mismo que "clave inválida".
 HASH_FALSO = hashear("contraseña-inexistente")
 
 
-# ───────── Bloqueo por intentos fallidos ─────────
 _fallos: dict[str, tuple[int, float]] = {}
 
 
@@ -74,7 +70,6 @@ def limpiar_fallos(clave: str):
     _fallos.pop(clave, None)
 
 
-# ───────── Sesiones (JWT) ─────────
 def crear_token(usuario: str, rol: str) -> str:
     payload = {
         "sub": usuario,

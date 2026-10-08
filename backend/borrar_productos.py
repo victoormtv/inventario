@@ -17,14 +17,12 @@ import sqlite3
 import sys
 from datetime import datetime
 
-# SKUs a borrar (con todas sus variantes y movimientos)
 SKUS_A_BORRAR = [
-    "PEG-CAS", "PEG-TRE",  # SKUs viejos (antes eran 2 productos)
-    "PEG-CAS-FLEX", "PEG-CAS-INT", "PEG-TRE-EXT", "PEG-TRE-INT",  # SKUs nuevos
+    "PEG-CAS", "PEG-TRE",
+    "PEG-CAS-FLEX", "PEG-CAS-INT", "PEG-TRE-EXT", "PEG-TRE-INT",
     "FRA-CAS", "CRU", "SIS-NIV",
 ]
 
-# Ruta de la base. Déjalo en None para buscarla automáticamente en esta carpeta.
 DB_PATH = None
 
 
@@ -49,8 +47,7 @@ def tablas(con):
 
 
 def columnas(con, tabla):
-    return con.execute(f"PRAGMA table_info({q(tabla)})").fetchall()  # cid, name, type, notnull, dflt, pk
-
+    return con.execute(f"PRAGMA table_info({q(tabla)})").fetchall()
 
 def pk_de(con, tabla):
     pks = [c[1] for c in columnas(con, tabla) if c[5]]
@@ -62,7 +59,6 @@ def hijos(con, padre):
     res = []
     for t in tablas(con):
         for fk in con.execute(f"PRAGMA foreign_key_list({q(t)})").fetchall():
-            # fk: id, seq, table, from, to, on_update, on_delete, match
             if fk[2] == padre:
                 res.append((t, fk[3], fk[4] or pk_de(con, padre)))
     return res

@@ -37,7 +37,7 @@ async function pedir(path: string, init: RequestInit = {}): Promise<Response> {
         } catch {
             /* respuesta sin JSON */
         }
-        if (res.status === 401 && sesion) cerrarSesion(); // sesión vencida: vuelve al login
+        if (res.status === 401 && sesion) cerrarSesion();
         throw new ApiError(res.status, mensajeDe(detail, res.status));
     }
     return res;

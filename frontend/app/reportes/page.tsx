@@ -65,7 +65,6 @@ const PRESETS = [
     { key: 'este_anio', label: 'Este año' },
 ];
 
-// Fecha local en formato YYYY-MM-DD (toISOString usa UTC y puede cambiar el día)
 const aIso = (d: Date) => {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');

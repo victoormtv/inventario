@@ -10,7 +10,6 @@ const OPCIONES = [
     { id: 'dark', label: 'Oscuro', icon: <FaMoon /> },
 ];
 
-// false en el servidor, true en el cliente: evita el setState dentro de un effect
 const sinSuscripcion = () => () => { };
 const useMontado = () =>
     useSyncExternalStore(sinSuscripcion, () => true, () => false);

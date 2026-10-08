@@ -18,7 +18,6 @@ export default function LoginPage() {
     const raiz = useRef<HTMLDivElement>(null);
     const errorRef = useRef<HTMLDivElement>(null);
 
-    // Animación de entrada
     useEffect(() => {
         const reducir = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         const ctx = gsap.context(() => {
@@ -39,7 +38,6 @@ export default function LoginPage() {
                 { scale: 1, rotate: 0, opacity: 1, duration: 0.9, ease: 'back.out(1.8)' }
             );
 
-            // Fondo: dos manchas suaves que flotan
             gsap.to('.blob-a', { x: 40, y: 30, duration: 9, ease: 'sine.inOut', repeat: -1, yoyo: true });
             gsap.to('.blob-b', { x: -50, y: -25, duration: 11, ease: 'sine.inOut', repeat: -1, yoyo: true });
         }, raiz);
@@ -47,7 +45,6 @@ export default function LoginPage() {
         return () => ctx.revert();
     }, []);
 
-    // Entrada del error + sacudida
     useEffect(() => {
         if (!error || !errorRef.current) return;
         gsap.fromTo(errorRef.current, { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.35, ease: 'power2.out' });
@@ -63,7 +60,6 @@ export default function LoginPage() {
                 method: 'POST',
                 json: { usuario, password },
             });
-            // Salida suave antes de redirigir
             gsap.to('.card-login', {
                 opacity: 0,
                 y: -16,

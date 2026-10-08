@@ -5,7 +5,6 @@ import { FaPrint, FaTimes, FaFileInvoice } from 'react-icons/fa';
 import type { ResultadoVenta } from '@/types';
 import Button from '@/components/ui/Button';
 
-// ====== DATOS CONFIGURABLES DE TU EMPRESA ======
 const EMPRESA = {
     nombre: 'INVERSIONES NATHAN S.R.L',
     ruc: '20610124616',

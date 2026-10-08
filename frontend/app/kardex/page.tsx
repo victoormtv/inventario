@@ -24,14 +24,12 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 
-// Estilos dinámicos asegurando compatibilidad de firma de índice con `string`
 const TIPO_ESTILOS: Record<string, { bg: string; text: string; border: string }> = {
     ENTRADA: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
     SALIDA: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200' },
     AJUSTE: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
 };
 
-// Casteo seguro para mapas de texto constantes
 const TEXTO_MAP = TEXTO as Record<string, string>;
 
 export default function KardexPage() {
