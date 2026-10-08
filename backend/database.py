@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from contextlib import contextmanager
 import libsql_client
 
@@ -19,7 +20,7 @@ class Row:
     __slots__ = ("_cols", "_vals")
 
     def __init__(self, cols, vals):
-        self._cols = cols
+        self._cols = list(cols)
         self._vals = tuple(vals)
 
     def __getitem__(self, k):
@@ -40,98 +41,133 @@ class Row:
         return f"Row({dict(zip(self._cols, self._vals))})"
 
 
-class Cursor:
-    def __init__(self, cur, owner=None):
-        self._cur = cur
-        self._owner = owner
+class CursorAdaptador:
+    """Adaptador para normalizar las respuestas tanto de sqlite3 como de Turso/libsql_client."""
 
-    def _autocommit(self):
-        o = self._owner
-        if o is not None and not o._en_tx:
-            try:
-                o._conn.commit()
-            except Exception:
-                pass
-
-    def _cols(self):
-        d = self._cur.description
-        return [c[0] for c in d] if d else []
+    def __init__(self, raw_conn, is_turso=False):
+        self._raw_conn = raw_conn
+        self._is_turso = is_turso
+        self._last_result = None
+        self._row_index = 0
+        self._lastrowid = None
+        self._rowcount = -1
 
     def execute(self, sql, params=()):
-        self._cur.execute(sql, tuple(params))
-        self._autocommit()
+        if self._is_turso:
+            # Convierte tuplas de parámetros a listas para compatibilidad con libsql_client
+            args = list(params) if isinstance(params, (tuple, list)) else params
+            res = self._raw_conn.execute(sql, args)
+            self._last_result = res
+            self._row_index = 0
+            self._lastrowid = getattr(res, "last_insert_rowid", None)
+            self._rowcount = getattr(res, "affected_row_count", -1)
+        else:
+            cur = self._raw_conn.cursor()
+            cur.execute(sql, tuple(params))
+            self._last_result = cur
+            self._lastrowid = cur.lastrowid
+            self._rowcount = cur.rowcount
         return self
 
     def executemany(self, sql, seq):
-        self._cur.executemany(sql, seq)
-        self._autocommit()
+        if self._is_turso:
+            for params in seq:
+                self.execute(sql, params)
+        else:
+            cur = self._raw_conn.cursor()
+            cur.executemany(sql, seq)
+            self._last_result = cur
+            self._lastrowid = cur.lastrowid
+            self._rowcount = cur.rowcount
         return self
 
     def fetchone(self):
-        r = self._cur.fetchone()
-        return None if r is None else Row(self._cols(), r)
+        if self._last_result is None:
+            return None
+        if self._is_turso:
+            rows = getattr(self._last_result, "rows", [])
+            cols = getattr(self._last_result, "columns", [])
+            if self._row_index < len(rows):
+                row = rows[self._row_index]
+                self._row_index += 1
+                return Row(cols, row)
+            return None
+        else:
+            r = self._last_result.fetchone()
+            if r is None:
+                return None
+            cols = [c[0] for c in self._last_result.description] if self._last_result.description else []
+            return Row(cols, r)
 
     def fetchall(self):
-        cols = self._cols()
-        return [Row(cols, r) for r in self._cur.fetchall()]
-
-    def fetchmany(self, n=1):
-        cols = self._cols()
-        return [Row(cols, r) for r in self._cur.fetchmany(n)]
+        if self._last_result is None:
+            return []
+        if self._is_turso:
+            rows = getattr(self._last_result, "rows", [])
+            cols = getattr(self._last_result, "columns", [])
+            restante = rows[self._row_index:]
+            self._row_index = len(rows)
+            return [Row(cols, r) for r in restante]
+        else:
+            cols = [c[0] for c in self._last_result.description] if self._last_result.description else []
+            return [Row(cols, r) for r in self._last_result.fetchall()]
 
     def __iter__(self):
         return iter(self.fetchall())
 
     @property
     def lastrowid(self):
-        return self._cur.lastrowid
+        return self._lastrowid
 
     @property
     def rowcount(self):
-        return self._cur.rowcount
-
-    @property
-    def description(self):
-        return self._cur.description
+        return self._rowcount
 
 
 class Conexion:
-    def __init__(self, conn):
-        self._conn = conn
+    def __init__(self, raw_conn, is_turso=False):
+        self._raw_conn = raw_conn
+        self.is_turso = is_turso
         self._en_tx = False
 
     def cursor(self):
-        return Cursor(self._conn.cursor(), self)
+        return CursorAdaptador(self._raw_conn, is_turso=self.is_turso)
 
     def execute(self, sql, params=()):
-        return self.cursor().execute(sql, params)
+        cur = self.cursor()
+        cur.execute(sql, params)
+        return cur
 
     def executemany(self, sql, seq):
-        return self.cursor().executemany(sql, seq)
-
-    def executescript(self, script):
-        return self._conn.executescript(script)
+        cur = self.cursor()
+        cur.executemany(sql, seq)
+        return cur
 
     def commit(self):
-        self._conn.commit()
+        if not self.is_turso and hasattr(self._raw_conn, "commit"):
+            self._raw_conn.commit()
 
     def rollback(self):
-        self._conn.rollback()
+        if not self.is_turso and hasattr(self._raw_conn, "rollback"):
+            self._raw_conn.rollback()
 
     def close(self):
         try:
-            self._conn.close()
+            if hasattr(self._raw_conn, "close"):
+                self._raw_conn.close()
         except Exception:
             pass
 
 
 def conectar():
+    """Retorna una conexión unificada compatible tanto para Turso como para SQLite local."""
     if TURSO_URL and TURSO_TOKEN:
-        # Usa create_client_sync en lugar de connect
-        return libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
-    # Conexión local a SQLite si no hay credenciales
-    import sqlite3
-    return sqlite3.connect("inventario.db")
+        url = TURSO_URL.replace("libsql://", "https://")
+        raw = libsql_client.create_client_sync(url=url, auth_token=TURSO_TOKEN)
+        return Conexion(raw, is_turso=True)
+    
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    return Conexion(conn, is_turso=False)
 
 
 def get_db():
@@ -155,29 +191,28 @@ def transaccion(conn: Conexion):
         conn._en_tx = False
 
 
-def _agregar_columna(cursor, tabla: str, columna: str, definicion: str):
-    existentes = [r[1] for r in cursor.execute(f"PRAGMA table_info({tabla})").fetchall()]
+def _agregar_columna(conn, tabla: str, columna: str, definicion: str):
+    cursor = conn.execute(f"PRAGMA table_info({tabla})")
+    existentes = [r[1] for r in cursor.fetchall()]
     if columna not in existentes:
-        cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
+        conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
 
 
 def inicializar_bd():
-    # En Turso las tablas ya existen: evita ~40 viajes de red en cada arranque.
-    # Para correr migraciones nuevas define INIT_DB=1 una vez.
+    # En Turso las tablas ya existen: evita sobrecargar las peticiones de red al arrancar.
     if TURSO_URL and os.environ.get("INIT_DB") != "1":
         return
 
     conn = conectar()
-    cursor = conn.cursor()
 
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS sucursales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT NOT NULL,
             direccion TEXT
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS productos (
             sku TEXT PRIMARY KEY,
             nombre TEXT NOT NULL,
@@ -187,7 +222,7 @@ def inicializar_bd():
             stock_minimo INTEGER DEFAULT 5
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS variantes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             sku_producto TEXT,
@@ -199,7 +234,7 @@ def inicializar_bd():
             FOREIGN KEY(id_sucursal) REFERENCES sucursales(id)
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS kardex (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -210,7 +245,7 @@ def inicializar_bd():
             id_sucursal INTEGER
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS terceros (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tipo TEXT CHECK(tipo IN ('cliente', 'proveedor')),
@@ -219,7 +254,7 @@ def inicializar_bd():
             telefono TEXT
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             usuario TEXT UNIQUE NOT NULL,
@@ -227,7 +262,7 @@ def inicializar_bd():
             rol TEXT CHECK(rol IN ('admin', 'vendedor', 'almacenero'))
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS auditoria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -235,13 +270,13 @@ def inicializar_bd():
             accion TEXT
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS reportes_enviados (
             periodo TEXT PRIMARY KEY,
             fecha_envio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS transacciones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tipo TEXT CHECK(tipo IN ('venta', 'compra')),
@@ -251,7 +286,7 @@ def inicializar_bd():
             FOREIGN KEY(tercero_id) REFERENCES terceros(id)
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS ventas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tipo_comprobante TEXT CHECK(tipo_comprobante IN ('boleta','factura')),
@@ -267,7 +302,7 @@ def inicializar_bd():
             FOREIGN KEY(id_cliente) REFERENCES terceros(id)
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS ventas_detalle (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             id_venta INTEGER,
@@ -282,52 +317,52 @@ def inicializar_bd():
             FOREIGN KEY(id_variante) REFERENCES variantes(id)
         )
     """)
-    cursor.execute("""
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS correlativos (
             serie TEXT PRIMARY KEY,
             ultimo INTEGER DEFAULT 0
         )
     """)
 
-    _agregar_columna(cursor, "kardex", "id_variante", "INTEGER")
-    _agregar_columna(cursor, "kardex", "stock_anterior", "INTEGER")
-    _agregar_columna(cursor, "kardex", "stock_resultante", "INTEGER")
-    _agregar_columna(cursor, "kardex", "usuario", "TEXT")
-    _agregar_columna(cursor, "terceros", "email", "TEXT")
-    _agregar_columna(cursor, "terceros", "direccion", "TEXT")
-    _agregar_columna(cursor, "kardex", "id_proveedor", "INTEGER")
-    _agregar_columna(cursor, "kardex", "precio_unitario", "REAL")
-    _agregar_columna(cursor, "kardex", "precio_anterior", "REAL")
-    _agregar_columna(cursor, "ventas", "metodo_pago", "TEXT DEFAULT 'efectivo'")
-    _agregar_columna(cursor, "ventas", "monto_pagado", "REAL")
-    _agregar_columna(cursor, "ventas", "vuelto", "REAL DEFAULT 0")
-    _agregar_columna(cursor, "ventas", "descuento", "REAL DEFAULT 0")
-    _agregar_columna(cursor, "ventas", "observaciones", "TEXT")
-    _agregar_columna(cursor, "ventas", "igv_total", "REAL DEFAULT 0")
-    _agregar_columna(cursor, "ventas_detalle", "unidad_medida", "TEXT DEFAULT 'NIU'")
-    _agregar_columna(cursor, "ventas_detalle", "tipo_item", "TEXT DEFAULT 'bien'")
-    _agregar_columna(cursor, "ventas_detalle", "valor_unitario", "REAL")
-    _agregar_columna(cursor, "ventas_detalle", "igv", "REAL DEFAULT 0")
-    _agregar_columna(cursor, "ventas", "id_vendedor", "INTEGER")
-    _agregar_columna(cursor, "variantes", "detalle", "TEXT")
-    _agregar_columna(cursor, "variantes", "kg", "REAL")
-    _agregar_columna(cursor, "variantes", "lote", "TEXT")
-    _agregar_columna(cursor, "variantes", "precio_costo", "REAL")
-    _agregar_columna(cursor, "variantes", "precio_venta", "REAL")
+    _agregar_columna(conn, "kardex", "id_variante", "INTEGER")
+    _agregar_columna(conn, "kardex", "stock_anterior", "INTEGER")
+    _agregar_columna(conn, "kardex", "stock_resultante", "INTEGER")
+    _agregar_columna(conn, "kardex", "usuario", "TEXT")
+    _agregar_columna(conn, "terceros", "email", "TEXT")
+    _agregar_columna(conn, "terceros", "direccion", "TEXT")
+    _agregar_columna(conn, "kardex", "id_proveedor", "INTEGER")
+    _agregar_columna(conn, "kardex", "precio_unitario", "REAL")
+    _agregar_columna(conn, "kardex", "precio_anterior", "REAL")
+    _agregar_columna(conn, "ventas", "metodo_pago", "TEXT DEFAULT 'efectivo'")
+    _agregar_columna(conn, "ventas", "monto_pagado", "REAL")
+    _agregar_columna(conn, "ventas", "vuelto", "REAL DEFAULT 0")
+    _agregar_columna(conn, "ventas", "descuento", "REAL DEFAULT 0")
+    _agregar_columna(conn, "ventas", "observaciones", "TEXT")
+    _agregar_columna(conn, "ventas", "igv_total", "REAL DEFAULT 0")
+    _agregar_columna(conn, "ventas_detalle", "unidad_medida", "TEXT DEFAULT 'NIU'")
+    _agregar_columna(conn, "ventas_detalle", "tipo_item", "TEXT DEFAULT 'bien'")
+    _agregar_columna(conn, "ventas_detalle", "valor_unitario", "REAL")
+    _agregar_columna(conn, "ventas_detalle", "igv", "REAL DEFAULT 0")
+    _agregar_columna(conn, "ventas", "id_vendedor", "INTEGER")
+    _agregar_columna(conn, "variantes", "detalle", "TEXT")
+    _agregar_columna(conn, "variantes", "kg", "REAL")
+    _agregar_columna(conn, "variantes", "lote", "TEXT")
+    _agregar_columna(conn, "variantes", "precio_costo", "REAL")
+    _agregar_columna(conn, "variantes", "precio_venta", "REAL")
 
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_variantes_sku ON variantes(sku_producto)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_sku ON kardex(sku_producto)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_fecha ON kardex(fecha)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_variante ON kardex(id_variante)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_proveedor ON kardex(id_proveedor)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_detalle_venta ON ventas_detalle(id_venta)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_variantes_sku ON variantes(sku_producto)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_kardex_sku ON kardex(sku_producto)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_kardex_fecha ON kardex(fecha)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_kardex_variante ON kardex(id_variante)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_kardex_proveedor ON kardex(id_proveedor)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ventas_detalle_venta ON ventas_detalle(id_venta)")
 
-    cursor.execute(
+    conn.execute(
         "INSERT OR IGNORE INTO sucursales (id, nombre) VALUES (?, ?)",
         (ALMACEN_ID, "Almacén principal"),
     )
-    cursor.execute(
+    conn.execute(
         "INSERT OR IGNORE INTO terceros (id, tipo, nombre, documento) VALUES (1, 'cliente', 'Cliente General', '00000000')",
     )
 
