@@ -8,6 +8,7 @@ export class ApiError extends Error {
         super(mensaje);
         this.status = status;
     }
+
 }
 
 function mensajeDe(detail: unknown, status: number): string {
