@@ -90,11 +90,11 @@ def _planificador_reporte_mensual():
 
 @app.on_event("startup")
 def iniciar_planificador():
+    # Desactivar hilos infinitos en Vercel (evita el congelamiento de serverless)
     if os.environ.get("VERCEL") == "1":
         return
     t = threading.Thread(target=_planificador_reporte_mensual, daemon=True)
     t.start()
-
 
 app.add_middleware(
     CORSMiddleware,
