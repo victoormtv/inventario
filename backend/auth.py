@@ -16,10 +16,11 @@ BLOQUEO_SEGUNDOS = 300
 
 
 def _cargar_secreto() -> str:
-    """Clave para firmar sesiones: variable de entorno o archivo .secret_key (se crea solo)."""
     desde_env = os.environ.get("INVENTARIO_SECRET")
     if desde_env:
         return desde_env
+    if os.environ.get("VERCEL") == "1":
+        raise RuntimeError("Falta INVENTARIO_SECRET en Vercel.")
     ruta = os.path.join(BASE_DIR, ".secret_key")
     if os.path.exists(ruta):
         with open(ruta, "r", encoding="utf-8") as f:
@@ -28,7 +29,6 @@ def _cargar_secreto() -> str:
     with open(ruta, "w", encoding="utf-8") as f:
         f.write(secreto)
     return secreto
-
 
 SECRETO = _cargar_secreto()
 _bearer = HTTPBearer(auto_error=False)

@@ -83,20 +83,33 @@ def _planificador_reporte_mensual():
         time.sleep(14400)
 
 
-@app.on_event("startup")
-def startup_event():
-    # Inicialización diferida para evitar bloqueos en Vercel
+def asegurar_admin():
+    from auth import hashear
+    conn = conectar()
     try:
-        inicializar_bd()
-        cargar_seed()
-        migrar_bd()
-    except Exception:
-        pass
+        if conn.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0:
+            clave = os.environ.get("ADMIN_PASSWORD")
+            if clave:
+                conn.execute(
+                    "INSERT INTO usuarios (usuario, password, rol) VALUES (?, ?, 'admin')",
+                    ("admin", hashear(clave)),
+                )
+    finally:
+        conn.close()
 
-    # Desactivar hilos infinitos en Vercel Serverless
+
+def _arranque():
+    import traceback
+    for paso in (inicializar_bd, cargar_seed, migrar_bd, asegurar_admin):
+        try:
+            paso()
+        except Exception:
+            traceback.print_exc()
     if os.environ.get("VERCEL") != "1":
-        t = threading.Thread(target=_planificador_reporte_mensual, daemon=True)
-        t.start()
+        threading.Thread(target=_planificador_reporte_mensual, daemon=True).start()
+
+
+_arranque()
 
 
 # Configuración de CORS segura
