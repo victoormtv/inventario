@@ -1,39 +1,137 @@
 import os
-import sqlite3
 from contextlib import contextmanager
+
+import libsql
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Detección de entorno Vercel: en Vercel solo la carpeta /tmp tiene permisos de escritura
-IS_VERCEL = os.environ.get("VERCEL") == "1"
-DEFAULT_DB_PATH = "/tmp/inventario.db" if IS_VERCEL else os.path.join(BASE_DIR, "inventario.db")
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "")
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "")
 
-DB_PATH = os.environ.get("INVENTARIO_DB", DEFAULT_DB_PATH)
-
-import shutil
-_SEED = os.path.join(BASE_DIR, "inventario.db")
-if IS_VERCEL and not os.path.exists(DB_PATH) and os.path.exists(_SEED):
-    shutil.copy(_SEED, DB_PATH)
+# Local (sin Turso): archivo SQLite junto al código
+DB_PATH = os.environ.get("INVENTARIO_DB", os.path.join(BASE_DIR, "inventario.db"))
 
 ALMACEN_ID = 1
 
 
-def conectar() -> sqlite3.Connection:
-    conn = sqlite3.connect(
-        DB_PATH,
-        check_same_thread=False,
-        isolation_level=None,
-        timeout=10,
-    )
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    
-    # En Vercel /tmp no soporta WAL mode correctamente
-    if not IS_VERCEL:
-        conn.execute("PRAGMA journal_mode = WAL")
-        
-    conn.execute("PRAGMA busy_timeout = 5000")
-    return conn
+class Row:
+    """Imita sqlite3.Row: acceso por índice, por nombre, keys() y dict(row)."""
+
+    __slots__ = ("_cols", "_vals")
+
+    def __init__(self, cols, vals):
+        self._cols = cols
+        self._vals = tuple(vals)
+
+    def __getitem__(self, k):
+        if isinstance(k, (int, slice)):
+            return self._vals[k]
+        return self._vals[self._cols.index(k)]
+
+    def keys(self):
+        return list(self._cols)
+
+    def __iter__(self):
+        return iter(self._vals)
+
+    def __len__(self):
+        return len(self._vals)
+
+    def __repr__(self):
+        return f"Row({dict(zip(self._cols, self._vals))})"
+
+
+class Cursor:
+    def __init__(self, cur, owner=None):
+        self._cur = cur
+        self._owner = owner
+
+    def _autocommit(self):
+        o = self._owner
+        if o is not None and not o._en_tx:
+            try:
+                o._conn.commit()
+            except Exception:
+                pass
+
+    def _cols(self):
+        d = self._cur.description
+        return [c[0] for c in d] if d else []
+
+    def execute(self, sql, params=()):
+        self._cur.execute(sql, tuple(params))
+        self._autocommit()
+        return self
+
+    def executemany(self, sql, seq):
+        self._cur.executemany(sql, seq)
+        self._autocommit()
+        return self
+
+    def fetchone(self):
+        r = self._cur.fetchone()
+        return None if r is None else Row(self._cols(), r)
+
+    def fetchall(self):
+        cols = self._cols()
+        return [Row(cols, r) for r in self._cur.fetchall()]
+
+    def fetchmany(self, n=1):
+        cols = self._cols()
+        return [Row(cols, r) for r in self._cur.fetchmany(n)]
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+    @property
+    def lastrowid(self):
+        return self._cur.lastrowid
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    @property
+    def description(self):
+        return self._cur.description
+
+
+class Conexion:
+    def __init__(self, conn):
+        self._conn = conn
+        self._en_tx = False
+
+    def cursor(self):
+        return Cursor(self._conn.cursor(), self)
+
+    def execute(self, sql, params=()):
+        return self.cursor().execute(sql, params)
+
+    def executemany(self, sql, seq):
+        return self.cursor().executemany(sql, seq)
+
+    def executescript(self, script):
+        return self._conn.executescript(script)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+
+
+def conectar() -> Conexion:
+    if TURSO_URL:
+        raw = libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+    else:
+        raw = libsql.connect(DB_PATH)
+    return Conexion(raw)
 
 
 def get_db():
@@ -45,23 +143,30 @@ def get_db():
 
 
 @contextmanager
-def transaccion(conn: sqlite3.Connection):
-    conn.execute("BEGIN IMMEDIATE")
+def transaccion(conn: Conexion):
+    conn._en_tx = True
     try:
         yield conn
-        conn.execute("COMMIT")
+        conn.commit()
     except BaseException:
-        conn.execute("ROLLBACK")
+        conn.rollback()
         raise
+    finally:
+        conn._en_tx = False
 
 
 def _agregar_columna(cursor, tabla: str, columna: str, definicion: str):
-    existentes = [r[1] for r in cursor.execute(f"PRAGMA table_info({tabla})")]
+    existentes = [r[1] for r in cursor.execute(f"PRAGMA table_info({tabla})").fetchall()]
     if columna not in existentes:
         cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {definicion}")
 
 
 def inicializar_bd():
+    # En Turso las tablas ya existen: evita ~40 viajes de red en cada arranque.
+    # Para correr migraciones nuevas define INIT_DB=1 una vez.
+    if TURSO_URL and os.environ.get("INIT_DB") != "1":
+        return
+
     conn = conectar()
     cursor = conn.cursor()
 
@@ -72,7 +177,6 @@ def inicializar_bd():
             direccion TEXT
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS productos (
             sku TEXT PRIMARY KEY,
@@ -83,7 +187,6 @@ def inicializar_bd():
             stock_minimo INTEGER DEFAULT 5
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS variantes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,7 +199,6 @@ def inicializar_bd():
             FOREIGN KEY(id_sucursal) REFERENCES sucursales(id)
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS kardex (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,7 +210,6 @@ def inicializar_bd():
             id_sucursal INTEGER
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS terceros (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,7 +219,6 @@ def inicializar_bd():
             telefono TEXT
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,7 +227,6 @@ def inicializar_bd():
             rol TEXT CHECK(rol IN ('admin', 'vendedor', 'almacenero'))
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS auditoria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,14 +235,12 @@ def inicializar_bd():
             accion TEXT
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS reportes_enviados (
             periodo TEXT PRIMARY KEY,
             fecha_envio TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS transacciones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,7 +251,6 @@ def inicializar_bd():
             FOREIGN KEY(tercero_id) REFERENCES terceros(id)
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ventas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,7 +267,6 @@ def inicializar_bd():
             FOREIGN KEY(id_cliente) REFERENCES terceros(id)
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ventas_detalle (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,7 +282,6 @@ def inicializar_bd():
             FOREIGN KEY(id_variante) REFERENCES variantes(id)
         )
     """)
-
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS correlativos (
             serie TEXT PRIMARY KEY,
@@ -195,7 +289,6 @@ def inicializar_bd():
         )
     """)
 
-    # ── Migraciones existentes ──
     _agregar_columna(cursor, "kardex", "id_variante", "INTEGER")
     _agregar_columna(cursor, "kardex", "stock_anterior", "INTEGER")
     _agregar_columna(cursor, "kardex", "stock_resultante", "INTEGER")
@@ -216,13 +309,12 @@ def inicializar_bd():
     _agregar_columna(cursor, "ventas_detalle", "valor_unitario", "REAL")
     _agregar_columna(cursor, "ventas_detalle", "igv", "REAL DEFAULT 0")
     _agregar_columna(cursor, "ventas", "id_vendedor", "INTEGER")
-
-    # ── Nuevas columnas en variantes ──
     _agregar_columna(cursor, "variantes", "detalle", "TEXT")
-    _agregar_columna(cursor, "variantes", "kg",      "REAL")
-    _agregar_columna(cursor, "variantes", "lote",    "TEXT")
+    _agregar_columna(cursor, "variantes", "kg", "REAL")
+    _agregar_columna(cursor, "variantes", "lote", "TEXT")
+    _agregar_columna(cursor, "variantes", "precio_costo", "REAL")
+    _agregar_columna(cursor, "variantes", "precio_venta", "REAL")
 
-    # Índices
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_variantes_sku ON variantes(sku_producto)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_sku ON kardex(sku_producto)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_kardex_fecha ON kardex(fecha)")
