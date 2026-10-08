@@ -89,12 +89,13 @@ def _detalle_venta(db, id_venta: int) -> dict:
 
 def _descripcion_y_costo(db, id_variante: int, nombre: str):
     var = db.execute(
-        """SELECT    COALESCE(NULLIF(v.precio_costo, 0), NULLIF(p.precio_costo, 0), 0) AS precio_costo
+        """SELECT v.talla, v.color,
+                  COALESCE(NULLIF(v.precio_costo, 0), NULLIF(p.precio_costo, 0), 0) AS precio_costo
            FROM variantes v JOIN productos p ON p.sku = v.sku_producto
            WHERE v.id = ?""",
         (id_variante,),
     ).fetchone()
-    costo = (var["costo"] if var else 0) or 0
+    costo = (var["precio_costo"] if var else 0) or 0
     partes = [nombre]
     if var and (var["talla"] or "").strip().lower() not in TALLAS_NEUTRAS:
         partes.append(var["talla"].strip())

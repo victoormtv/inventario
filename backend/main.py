@@ -387,6 +387,17 @@ def editar_producto(sku: str, p: ProductoEdit, db=Depends(get_db), usuario: str 
                WHERE sku=?""",
             (p.nombre, p.categoria, p.precio_costo, p.precio_venta, p.stock_minimo, sku),
         )
+        # Sincronizar el costo en todas las variantes del producto
+        if p.precio_costo is not None:
+            db.execute(
+                "UPDATE variantes SET precio_costo = ? WHERE sku_producto = ?",
+                (p.precio_costo, sku),
+            )
+        if p.precio_venta is not None:
+            db.execute(
+                "UPDATE variantes SET precio_venta = ? WHERE sku_producto = ?",
+                (p.precio_venta, sku),
+            )
         auditar(db, usuario, f"Editó el producto {sku}")
     return {"sku": sku}
 
