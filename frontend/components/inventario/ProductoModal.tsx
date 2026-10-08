@@ -107,9 +107,11 @@ export default function ProductoModal({ producto, variante, onGuardado, onCerrar
         const bodyP = {
             nombre: formP.nombre.trim(),
             categoria: formP.categoria.trim(),
-            precio_costo: parseFloat(formP.precio_costo) || 0,
-            precio_venta: parseFloat(formP.precio_venta) || 0,
             stock_minimo: parseInt(formP.stock_minimo) || 0,
+            ...(variante ? {} : {
+                precio_costo: parseFloat(formP.precio_costo) || 0,
+                precio_venta: parseFloat(formP.precio_venta) || 0,
+            }),
         };
 
         try {
@@ -133,6 +135,8 @@ export default function ProductoModal({ producto, variante, onGuardado, onCerrar
                         detalle: formV.detalle.trim() || null,
                         kg: formV.kg !== '' ? parseFloat(formV.kg) : null,
                         lote: formV.lote.trim() || null,
+                        precio_costo: parseFloat(formP.precio_costo) || 0,
+                        precio_venta: parseFloat(formP.precio_venta) || 0,
                     },
                 });
             } catch (err) {

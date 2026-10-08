@@ -2139,10 +2139,100 @@ body {
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
+
   html {
     @apply font-sans;
   }
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ───────────── Modo Oscuro ───────────── */
+.dark {
+  color-scheme: dark;
+
+  /* Superficies en modo oscuro */
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --line: #334155;
+  --line-soft: #1e293b;
+
+  /* Texto en modo oscuro */
+  --ink: #f8fafc;
+  --ink-2: #cbd5e1;
+  --ink-3: #94a3b8;
+
+  /* Colores de Marca y Estados adaptados */
+  --brand: #6366f1;
+  --brand-strong: #818cf8;
+  --brand-tint: rgba(99, 102, 241, 0.15);
+
+  --warn: #fb923c;
+  --warn-tint: rgba(251, 146, 60, 0.15);
+  --danger: #f87171;
+  --danger-tint: rgba(248, 113, 113, 0.15);
+  --ok: #4ade80;
+  --ok-tint: rgba(74, 222, 128, 0.15);
+
+  /* Tablas y elementos interactivos */
+  --surface-2: #334155;
+
+  /* Tokens Shadcn UI */
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
+  /* Redefinición de colores Tailwind */
+  --color-white: #0f172a;
+  --color-slate-50: #020617;
+  --color-slate-100: #0f172a;
+  --color-slate-200: #1e293b;
+  --color-slate-300: #475569;
+  --color-slate-500: #94a3b8;
+  --color-slate-600: #cbd5e1;
+  --color-slate-700: #e2e8f0;
+  --color-slate-800: #f1f5f9;
+  --color-slate-900: #f8fafc;
+}
+
+/* Ajustes adicionales para elementos específicos en dark mode */
+.dark .table th,
+.dark .table tbody tr:hover,
+.dark .picker__item:hover {
+  background: #182234;
+}
+
+.dark .input,
+.dark .select {
+  background: #0f172a;
+  border-color: #334155;
+  color: var(--ink);
+}
+
+.dark .segmented {
+  background: #0f172a;
+}
+
+.dark .dropzone {
+  background: #1e293b;
+  border-color: #334155;
 }

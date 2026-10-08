@@ -405,7 +405,7 @@ export default function InventarioPage() {
                                                             <button
                                                                 onClick={() => setModalProducto({
                                                                     producto: { sku: v.sku, nombre: v.nombre, categoria: v.categoria, precio_costo: v.precio_costo, precio_venta: v.precio_venta, stock_minimo: v.stock_minimo, stock_total: 0, num_variantes: 0 },
-                                                                    variante: { id: v.id_variante, talla: v.talla, color: v.color, stock_actual: v.stock_actual },
+                                                                    variante: { id: v.id_variante, talla: v.talla, color: v.color, detalle: v.detalle, kg: v.kg, lote: v.lote, stock_actual: v.stock_actual },
                                                                 })}
                                                                 title="Editar producto"
                                                                 className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all cursor-pointer">

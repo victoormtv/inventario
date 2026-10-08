@@ -1,17 +1,12 @@
 'use client';
-import { useState } from 'react';
-import { FaCheck, FaEye, FaEyeSlash, FaWarehouse, FaShieldAlt, FaBoxOpen } from 'react-icons/fa';
+import { useEffect, useRef, useState } from 'react';
+import { gsap } from 'gsap';
+import { FaEye, FaEyeSlash, FaExclamationCircle, FaSpinner, FaWarehouse } from 'react-icons/fa';
 import { api } from '@/lib/api';
 import { guardarSesion } from '@/lib/session';
-import Button from '@/components/ui/Button';
-import { Callout } from '@/components/ui/Form';
 
-const BENEFICIOS = [
-    'Avisos en tiempo real sobre productos por reponer.',
-    'Kardex detallado con historial de entradas, salidas y ajustes.',
-    'Control de variantes por talla, medida, peso y color.',
-    'Integración con módulos de ventas e historial de comprobantes.',
-];
+const inputCls =
+    'w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 text-base text-slate-900 font-medium focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 hover:border-slate-300 transition placeholder:text-slate-300';
 
 export default function LoginPage() {
     const [usuario, setUsuario] = useState('');
@@ -19,6 +14,45 @@ export default function LoginPage() {
     const [verClave, setVerClave] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [enviando, setEnviando] = useState(false);
+
+    const raiz = useRef<HTMLDivElement>(null);
+    const errorRef = useRef<HTMLDivElement>(null);
+
+    // Animación de entrada
+    useEffect(() => {
+        const reducir = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const ctx = gsap.context(() => {
+            if (reducir) {
+                gsap.set('.anim', { opacity: 1 });
+                return;
+            }
+
+            gsap.fromTo(
+                '.anim',
+                { y: 28, opacity: 0 },
+                { y: 0, opacity: 1, duration: 0.8, ease: 'power3.out', stagger: 0.09, delay: 0.1, clearProps: 'transform' }
+            );
+
+            gsap.fromTo(
+                '.logo',
+                { scale: 0.6, rotate: -12, opacity: 0 },
+                { scale: 1, rotate: 0, opacity: 1, duration: 0.9, ease: 'back.out(1.8)' }
+            );
+
+            // Fondo: dos manchas suaves que flotan
+            gsap.to('.blob-a', { x: 40, y: 30, duration: 9, ease: 'sine.inOut', repeat: -1, yoyo: true });
+            gsap.to('.blob-b', { x: -50, y: -25, duration: 11, ease: 'sine.inOut', repeat: -1, yoyo: true });
+        }, raiz);
+
+        return () => ctx.revert();
+    }, []);
+
+    // Entrada del error + sacudida
+    useEffect(() => {
+        if (!error || !errorRef.current) return;
+        gsap.fromTo(errorRef.current, { opacity: 0, y: -8 }, { opacity: 1, y: 0, duration: 0.35, ease: 'power2.out' });
+        gsap.fromTo('.card-login', { x: 0 }, { x: 0, keyframes: { x: [-10, 10, -7, 7, -3, 3, 0] }, duration: 0.5, ease: 'power1.out' });
+    }, [error]);
 
     const entrar = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -29,7 +63,14 @@ export default function LoginPage() {
                 method: 'POST',
                 json: { usuario, password },
             });
-            guardarSesion({ token: r.token, usuario: r.usuario });
+            // Salida suave antes de redirigir
+            gsap.to('.card-login', {
+                opacity: 0,
+                y: -16,
+                duration: 0.35,
+                ease: 'power2.in',
+                onComplete: () => guardarSesion({ token: r.token, usuario: r.usuario }),
+            });
         } catch (err) {
             setError((err as Error).message);
             setEnviando(false);
@@ -37,174 +78,114 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 sm:p-6 lg:p-8">
-            <div className="w-full max-w-5xl bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 min-h-[620px]">
+        <div ref={raiz} className="relative min-h-screen bg-slate-50 flex items-center justify-center p-6 overflow-hidden">
+            <style jsx global>{`
+                input:-webkit-autofill,
+                input:-webkit-autofill:hover,
+                input:-webkit-autofill:focus,
+                input:-webkit-autofill:active {
+                    -webkit-box-shadow: 0 0 0 1000px var(--color-white) inset !important;
+                    box-shadow: 0 0 0 1000px var(--color-white) inset !important;
+                    -webkit-text-fill-color: var(--color-slate-900) !important;
+                    caret-color: var(--color-slate-900);
+                    border-radius: 1rem;
+                    transition: background-color 9999s ease-in-out 0s;
+                }
+            `}</style>
 
-                {/* ── Lateral izquierdo: Branding e Ilustración ── */}
-                <aside className="lg:col-span-6 bg-slate-900 text-white p-8 sm:p-12 flex flex-col justify-between relative overflow-hidden">
-                    {/* Efecto de luz ambiental en el fondo */}
-                    <div className="absolute -top-24 -left-24 w-72 h-72 bg-indigo-600/30 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-emerald-600/20 rounded-full blur-3xl pointer-events-none" />
+            {/* Fondo minimalista */}
+            <div className="blob-a pointer-events-none absolute -top-40 -left-40 w-[520px] h-[520px] rounded-full bg-indigo-200/40 blur-3xl" />
+            <div className="blob-b pointer-events-none absolute -bottom-40 -right-40 w-[520px] h-[520px] rounded-full bg-sky-200/40 blur-3xl" />
 
-                    <div className="relative z-10 space-y-6">
-                        {/* Logo */}
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-lg font-bold shadow-md shadow-indigo-500/30">
-                                <FaWarehouse />
-                            </div>
-                            <span className="text-xl font-black tracking-tight text-white">Nathan Inventario</span>
+            <main className="card-login relative w-full max-w-md">
+                <div className="space-y-10">
+
+                    {/* Marca */}
+                    <div className="flex flex-col items-center text-center space-y-5">
+                        <div className="logo w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-2xl shadow-xl shadow-indigo-600/25">
+                            <FaWarehouse />
                         </div>
-
-                        {/* Mensajes principales */}
-                        <div className="pt-4 space-y-2">
-                            <h2 className="text-2xl sm:text-3xl font-extrabold text-white leading-tight">
-                                Tu stock y ventas, <br />
-                                <span className="text-indigo-400">siempre bajo control.</span>
-                            </h2>
-                            <p className="text-slate-400 text-sm leading-relaxed">
-                                Controla productos, variantes, precios y movimientos en un solo lugar sin depender de hojas de cálculo propensas a errores.
-                            </p>
+                        <div className="anim opacity-0 space-y-2">
+                            <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest">Nathan Inventario</p>
+                            <h1 className="text-4xl font-black text-slate-900 tracking-tight">Bienvenido</h1>
+                            <p className="text-slate-500 text-base">Ingresa tus credenciales para continuar.</p>
                         </div>
-
-                        {/* Lista de beneficios */}
-                        <ul className="space-y-3 pt-2">
-                            {BENEFICIOS.map((b) => (
-                                <li key={b} className="flex items-start gap-3 text-xs text-slate-300 font-medium">
-                                    <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5 border border-emerald-500/20">
-                                        <FaCheck className="text-[10px]" />
-                                    </span>
-                                    <span>{b}</span>
-                                </li>
-                            ))}
-                        </ul>
                     </div>
 
-                    {/* Widget decorativo tipo Vista Previa */}
-                    <div className="relative z-10 pt-8 mt-auto">
-                        <div className="bg-slate-800/80 backdrop-blur-md rounded-2xl p-4 border border-slate-700/60 space-y-3 shadow-lg">
-                            <div className="flex items-center justify-between text-xs font-semibold text-slate-400">
-                                <span className="flex items-center gap-1.5 text-slate-300">
-                                    <FaBoxOpen className="text-amber-400" /> Alertas de repositorio
-                                </span>
-                                <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md text-[10px] font-bold border border-amber-500/30">
-                                    2 urgentes
-                                </span>
-                            </div>
-                            <div className="space-y-2">
-                                <div>
-                                    <div className="flex justify-between text-xs text-slate-300 mb-1 font-medium">
-                                        <span>Pegamento extra fuerte</span>
-                                        <span className="text-amber-400 font-mono font-bold">3 u.</span>
-                                    </div>
-                                    <div className="w-full bg-slate-700/60 rounded-full h-1.5 overflow-hidden">
-                                        <div className="bg-amber-500 h-full rounded-full" style={{ width: '30%' }} />
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="flex justify-between text-xs text-slate-300 mb-1 font-medium">
-                                        <span>Fragua porcelanato</span>
-                                        <span className="text-rose-400 font-mono font-bold">1 u.</span>
-                                    </div>
-                                    <div className="w-full bg-slate-700/60 rounded-full h-1.5 overflow-hidden">
-                                        <div className="bg-rose-500 h-full rounded-full" style={{ width: '12%' }} />
-                                    </div>
-                                </div>
-                            </div>
+                    {error && (
+                        <div
+                            ref={errorRef}
+                            className="p-4 bg-red-50 text-red-700 text-sm rounded-2xl border border-red-100 flex items-start gap-3">
+                            <FaExclamationCircle className="shrink-0 text-red-500 mt-0.5" />
+                            <span>{error}</span>
+                        </div>
+                    )}
+
+                    <form onSubmit={entrar} className="space-y-5">
+                        <div className="anim opacity-0 space-y-2">
+                            <label className="block text-sm font-semibold text-slate-600" htmlFor="usuario">
+                                Usuario
+                            </label>
+                            <input
+                                id="usuario"
+                                type="text"
+                                className={inputCls}
+                                value={usuario}
+                                onChange={(e) => setUsuario(e.target.value)}
+                                placeholder="Ej. admin"
+                                autoComplete="username"
+                                autoFocus
+                                required
+                            />
                         </div>
 
-                        <p className="text-[11px] text-slate-500 mt-4 flex items-center gap-1.5">
-                            <FaShieldAlt className="text-indigo-400" /> Acceso seguro restringido a personal autorizado.
-                        </p>
-                    </div>
-                </aside>
-
-                {/* ── Formulario de inicio de sesión ── */}
-                <div className="lg:col-span-6 p-8 sm:p-12 flex flex-col justify-center bg-white">
-                    <div className="max-w-sm mx-auto w-full space-y-6">
-
-                        {/* Header móvil del logo */}
-                        <div className="flex items-center gap-2 lg:hidden mb-2">
-                            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-sm font-bold">
-                                <FaWarehouse />
-                            </div>
-                            <span className="text-lg font-black text-slate-900">Nathan Inventario</span>
-                        </div>
-
-                        <div>
-                            <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1">Acceso al sistema</p>
-                            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Bienvenido de nuevo</h1>
-                            <p className="text-slate-500 text-sm mt-1">
-                                Ingresa tus credenciales para administrar el inventario.
-                            </p>
-                        </div>
-
-                        {error && (
-                            <Callout tono="danger">
-                                {error}
-                            </Callout>
-                        )}
-
-                        <form onSubmit={entrar} className="space-y-4">
-                            {/* Campo Usuario */}
-                            <div className="space-y-1.5">
-                                <label className="block text-xs font-semibold text-slate-700" htmlFor="usuario">
-                                    Usuario
-                                </label>
+                        <div className="anim opacity-0 space-y-2">
+                            <label className="block text-sm font-semibold text-slate-600" htmlFor="password">
+                                Contraseña
+                            </label>
+                            <div className="relative">
                                 <input
-                                    id="usuario"
-                                    type="text"
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition placeholder:text-slate-300"
-                                    value={usuario}
-                                    onChange={(e) => setUsuario(e.target.value)}
-                                    placeholder="Ej. admin"
-                                    autoComplete="username"
-                                    autoFocus
+                                    id="password"
+                                    type={verClave ? 'text' : 'password'}
+                                    className={`${inputCls} pr-14`}
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="••••••••"
+                                    autoComplete="current-password"
                                     required
                                 />
+                                <button
+                                    type="button"
+                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition p-1.5 cursor-pointer"
+                                    onClick={() => setVerClave((v) => !v)}
+                                    aria-label={verClave ? 'Ocultar contraseña' : 'Mostrar contraseña'}>
+                                    {verClave ? <FaEyeSlash /> : <FaEye />}
+                                </button>
                             </div>
+                        </div>
 
-                            {/* Campo Contraseña */}
-                            <div className="space-y-1.5">
-                                <label className="block text-xs font-semibold text-slate-700" htmlFor="password">
-                                    Contraseña
-                                </label>
-                                <div className="relative">
-                                    <input
-                                        id="password"
-                                        type={verClave ? 'text' : 'password'}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-10 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition placeholder:text-slate-300"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                        placeholder="••••••••"
-                                        autoComplete="current-password"
-                                        required
-                                    />
-                                    <button
-                                        type="button"
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition p-1 cursor-pointer"
-                                        onClick={() => setVerClave((v) => !v)}
-                                        aria-label={verClave ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                                    >
-                                        {verClave ? <FaEyeSlash className="text-sm" /> : <FaEye className="text-sm" />}
-                                    </button>
-                                </div>
-                            </div>
+                        <div className="anim opacity-0 pt-2">
+                            <button
+                                type="submit"
+                                disabled={enviando}
+                                className="w-full flex items-center justify-center gap-2.5 px-5 py-4 text-base font-bold text-white bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] rounded-2xl transition-all cursor-pointer shadow-lg shadow-indigo-600/25 disabled:opacity-60 disabled:cursor-not-allowed">
+                                {enviando ? (
+                                    <>
+                                        <FaSpinner className="animate-spin" />
+                                        Ingresando…
+                                    </>
+                                ) : (
+                                    'Iniciar sesión'
+                                )}
+                            </button>
+                        </div>
+                    </form>
 
-                            {/* Botón Ingresar */}
-                            <div className="pt-2">
-                                <Button type="submit" variante="primario" bloque cargando={enviando}>
-                                    Iniciar sesión
-                                </Button>
-                            </div>
-                        </form>
-
-                        <p className="text-center text-xs text-slate-400">
-                            ¿Olvidaste tu contraseña? Contacta con el administrador principal para restablecer tu cuenta.
-                        </p>
-                    </div>
+                    <p className="anim opacity-0 text-center text-sm text-slate-400">
+                        ¿Olvidaste tu contraseña? Contacta con el administrador.
+                    </p>
                 </div>
-
-            </div>
+            </main>
         </div>
     );
 }

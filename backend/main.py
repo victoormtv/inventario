@@ -1,24 +1,13 @@
-from ast import List
-from typing import Optional
 import os
+import sqlite3
 import threading
 import time
-from typing import Annotated, Literal
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from typing import Annotated, Literal, Optional
 
 from dotenv import load_dotenv
-
-load_dotenv()
-app = FastAPI(title="API Sistema de Inventario", version="2.0")
-
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, StringConstraints, model_validator
-from ventas import router as ventas_router
-from exportar_pro import router as exportar_pro_router
-from typing import Optional
-from pydantic import BaseModel
 
 from alertas import correo_configurado, destinatarios, enviar_correo, notificar_cruce, productos_bajo_minimo
 from auth import (
@@ -30,19 +19,20 @@ from auth import (
     verificar,
     verificar_bloqueo,
 )
-from database import ALMACEN_ID, get_db, inicializar_bd, transaccion
+from database import ALMACEN_ID, conectar, get_db, inicializar_bd, transaccion
+from exportar_pro import router as exportar_pro_router
+from mercaderia import router as mercaderia_router
 from reportes import router as reportes_router, verificar_y_enviar_reporte_mensual_automatico
 from servicios import aplicar_movimiento, auditar
-from mercaderia import router as mercaderia_router
+from ventas import router as ventas_router
 
-from database import ALMACEN_ID, get_db, inicializar_bd, transaccion
+load_dotenv()
 
 
 def cargar_seed():
     ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed.sql")
     if not os.path.exists(ruta):
         return
-    from database import conectar
     conn = conectar()
     try:
         if conn.execute("SELECT COUNT(*) FROM variantes").fetchone()[0] == 0:
@@ -52,8 +42,38 @@ def cargar_seed():
         conn.close()
 
 
+def _agregar_columna(conn, tabla: str, columna: str, tipo: str):
+    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({tabla})").fetchall()]
+    if columna not in cols:
+        conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
+
+
+def migrar_bd():
+    """Precio por variante + columnas usadas por comprobantes. Se puede correr muchas veces."""
+    conn = conectar()
+    try:
+        _agregar_columna(conn, "variantes", "precio_costo", "REAL")
+        _agregar_columna(conn, "variantes", "precio_venta", "REAL")
+        _agregar_columna(conn, "variantes", "detalle", "TEXT")
+        _agregar_columna(conn, "variantes", "kg", "REAL")
+        _agregar_columna(conn, "variantes", "lote", "TEXT")
+        _agregar_columna(conn, "ventas", "serie", "TEXT")
+        _agregar_columna(conn, "ventas", "numero", "INTEGER")
+        _agregar_columna(conn, "ventas", "ganancia_total", "REAL")
+        conn.execute(
+            """UPDATE variantes SET
+                 precio_costo = (SELECT precio_costo FROM productos WHERE sku = variantes.sku_producto),
+                 precio_venta = (SELECT precio_venta FROM productos WHERE sku = variantes.sku_producto)
+               WHERE precio_costo IS NULL OR precio_venta IS NULL"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 inicializar_bd()
 cargar_seed()
+migrar_bd()
 
 app = FastAPI(title="API Sistema de Inventario", version="2.0")
 
@@ -72,11 +92,6 @@ def iniciar_planificador():
     t = threading.Thread(target=_planificador_reporte_mensual, daemon=True)
     t.start()
 
-
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
 
 app.add_middleware(
     CORSMiddleware,
@@ -108,8 +123,9 @@ class ProductoIn(BaseModel):
 class ProductoEdit(BaseModel):
     nombre: Texto
     categoria: TextoOpcional = ""
-    precio_costo: float = Field(ge=0)
-    precio_venta: float = Field(ge=0)
+    # Opcionales: si no se envían, el producto conserva su precio base.
+    precio_costo: float | None = Field(default=None, ge=0)
+    precio_venta: float | None = Field(default=None, ge=0)
     stock_minimo: int = Field(ge=0)
 
 
@@ -121,9 +137,12 @@ class VarianteIn(BaseModel):
 
 class VarianteEdit(BaseModel):
     color: Texto
-    detalle: TextoOpcional = ""
+    detalle: TextoOpcional | None = None
     kg: float | None = Field(default=None, ge=0)
-    lote: TextoOpcional = ""
+    lote: TextoOpcional | None = None
+    precio_costo: float = Field(ge=0)
+    precio_venta: float = Field(ge=0)
+
 
 class MovimientoIn(BaseModel):
     id_variante: int
@@ -146,36 +165,12 @@ class ContactoIn(BaseModel):
     email: TextoOpcional = ""
     direccion: TextoOpcional = ""
 
+
 class UsuarioResponse(BaseModel):
     id: int
     usuario: str
     nombre: Optional[str] = None
     rol: Optional[str] = None
-
-
-class ProductoModel(BaseModel):
-    sku: str
-    nombre: str
-    categoria: Optional[str] = None
-    precio_costo: float
-    precio_venta: float
-    stock_minimo: int = 5
-
-
-class VarianteCreate(BaseModel):
-    talla: str
-    color: str
-    stock_inicial: int = 0
-    id_sucursal: int = 1
-
-
-class MovimientoKardexCreate(BaseModel):
-    id_variante: int
-    tipo_movimiento: str  # ENTRADA, SALIDA, AJUSTE
-    cantidad: int
-    referencia: Optional[str] = None
-    usuario: Optional[str] = "admin"
-    id_sucursal: int = 1
 
 
 class ItemVentaCreate(BaseModel):
@@ -190,15 +185,8 @@ class VentaCreate(BaseModel):
     tipo_comprobante: str  # 'boleta' o 'factura'
     id_cliente: int
     id_vendedor: Optional[int] = None
-    items: list[ItemVentaCreate]  # Usando list nativo de Python 3.9+
+    items: list[ItemVentaCreate]
 
-
-class IngresoMercaderiaCreate(BaseModel):
-    id_variante: int
-    cantidad: int
-    precio_costo_unitario: float
-    referencia: Optional[str] = "Ingreso de mercadería"
-    id_proveedor: Optional[int] = None
 
 # ───────────────────────── Sesión ─────────────────────────
 @app.post("/api/auth/login")
@@ -215,6 +203,98 @@ def login(datos: LoginIn, db=Depends(get_db)):
     limpiar_fallos(clave)
     auditar(db, fila["usuario"], "Inició sesión")
     return {"token": crear_token(fila["usuario"], fila["rol"]), "usuario": fila["usuario"], "rol": fila["rol"]}
+
+
+@app.get("/api/usuarios", response_model=list[UsuarioResponse])
+def listar_usuarios(db=Depends(get_db)):
+    cursor = db.cursor()
+    cursor.execute("SELECT id, usuario, nombre, rol FROM usuarios ORDER BY usuario ASC")
+    return [dict(row) for row in cursor.fetchall()]
+
+
+@app.post("/api/ventas")
+def registrar_venta(venta: VentaCreate, db=Depends(get_db)):
+    cursor = db.cursor()
+    try:
+        if venta.tipo_comprobante not in ("boleta", "factura"):
+            raise HTTPException(status_code=400, detail="Tipo de comprobante inválido.")
+        if not venta.items:
+            raise HTTPException(status_code=400, detail="La venta no tiene ítems.")
+
+        total_venta = sum(item.cantidad * item.precio_venta for item in venta.items)
+        subtotal_venta = total_venta / 1.18
+        igv_total = total_venta - subtotal_venta
+
+        vendedor_nombre = None
+        if venta.id_vendedor:
+            cursor.execute("SELECT usuario FROM usuarios WHERE id = ?", (venta.id_vendedor,))
+            usr = cursor.fetchone()
+            if usr:
+                vendedor_nombre = usr["usuario"]
+
+        # Correlativo por serie
+        serie = "F001" if venta.tipo_comprobante == "factura" else "B001"
+        cursor.execute("SELECT COALESCE(MAX(numero), 0) + 1 AS n FROM ventas WHERE serie = ?", (serie,))
+        numero = cursor.fetchone()["n"]
+
+        cursor.execute(
+            """
+            INSERT INTO ventas (tipo_comprobante, serie, numero, id_cliente, id_vendedor, usuario,
+                                subtotal, total, igv_total, ganancia_total)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            """,
+            (venta.tipo_comprobante, serie, numero, venta.id_cliente, venta.id_vendedor,
+             vendedor_nombre, subtotal_venta, total_venta, igv_total),
+        )
+        id_venta = cursor.lastrowid
+
+        ganancia_total = 0.0
+        for item in venta.items:
+            cursor.execute(
+                """
+                SELECT v.sku_producto, COALESCE(v.precio_costo, p.precio_costo) AS precio_costo
+                FROM variantes v
+                JOIN productos p ON v.sku_producto = p.sku
+                WHERE v.id = ?
+                """,
+                (item.id_variante,),
+            )
+            var_data = cursor.fetchone()
+            if not var_data:
+                raise HTTPException(status_code=400, detail=f"Variante {item.id_variante} no encontrada")
+
+            ganancia = (item.precio_venta - var_data["precio_costo"]) * item.cantidad
+            ganancia_total += ganancia
+
+            cursor.execute(
+                """
+                INSERT INTO ventas_detalle (id_venta, id_variante, sku_producto, cantidad, precio_costo,
+                                            precio_venta, ganancia, unidad_medida, tipo_item)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (id_venta, item.id_variante, var_data["sku_producto"], item.cantidad,
+                 var_data["precio_costo"], item.precio_venta, ganancia, item.unidad_medida, item.tipo_item),
+            )
+            cursor.execute(
+                "UPDATE variantes SET stock_actual = stock_actual - ? WHERE id = ?",
+                (item.cantidad, item.id_variante),
+            )
+
+        cursor.execute("UPDATE ventas SET ganancia_total = ? WHERE id = ?", (ganancia_total, id_venta))
+
+        db.commit()
+        return {
+            "mensaje": "Venta registrada exitosamente",
+            "id_venta": id_venta,
+            "serie": serie,
+            "numero": numero,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # Todo lo demás exige sesión iniciada
@@ -265,70 +345,6 @@ def listar_productos(
     ).fetchall()
     return {"items": [dict(f) for f in filas], "total": total, "page": page, "limit": limit}
 
-@app.get("/api/usuarios", response_model=list[UsuarioResponse])
-def listar_usuarios(db=Depends(get_db)):
-    cursor = db.cursor()
-    cursor.execute("SELECT id, usuario, nombre, rol FROM usuarios ORDER BY usuario ASC")
-    usuarios = [dict(row) for row in cursor.fetchall()]
-    return usuarios
-
-@app.post("/api/ventas")
-def registrar_venta(venta: VentaCreate):
-    db = get_db()
-    cursor = db.cursor()
-    try:
-        # Calcular total y subtotal
-        total_venta = sum(item.cantidad * item.precio_venta for item in venta.items)
-        subtotal_venta = total_venta / 1.18
-        igv_total = total_venta - subtotal_venta
-
-        # Obtener nombre/código de usuario vendedor si se envió id_vendedor
-        vendedor_nombre = None
-        if venta.id_vendedor:
-            cursor.execute("SELECT usuario FROM usuarios WHERE id = ?", (venta.id_vendedor,))
-            usr = cursor.fetchone()
-            if usr:
-                vendedor_nombre = usr["usuario"]
-
-        # Insertar cabecera de la venta incluyendo id_vendedor y usuario
-        cursor.execute("""
-            INSERT INTO ventas (tipo_comprobante, id_cliente, id_vendedor, usuario, subtotal, total, igv_total)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (venta.tipo_comprobante, venta.id_cliente, venta.id_vendedor, vendedor_nombre, subtotal_venta, total_venta, igv_total))
-        
-        id_venta = cursor.lastrowid
-
-        # Insertar detalle de venta y descontar stock
-        for item in venta.items:
-            # Obtener datos de la variante y costo
-            cursor.execute("""
-                SELECT v.sku_producto, p.precio_costo 
-                FROM variantes v 
-                JOIN productos p ON v.sku_producto = p.sku 
-                WHERE v.id = ?
-            """, (item.id_variante,))
-            var_data = cursor.fetchone()
-            
-            if not var_data:
-                raise HTTPException(status_code=400, detail=f"Variante {item.id_variante} no encontrada")
-
-            ganancia = (item.precio_venta - var_data["precio_costo"]) * item.cantidad
-
-            cursor.execute("""
-                INSERT INTO ventas_detalle (id_venta, id_variante, sku_producto, cantidad, precio_costo, precio_venta, ganancia, unidad_medida, tipo_item)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (id_venta, item.id_variante, var_data["sku_producto"], item.cantidad, var_data["precio_costo"], item.precio_venta, ganancia, item.unidad_medida, item.tipo_item))
-
-            # Descontar stock en la variante
-            cursor.execute("UPDATE variantes SET stock_actual = stock_actual - ? WHERE id = ?", (item.cantidad, item.id_variante))
-
-        db.commit()
-        return {"mensaje": "Venta registrada exitosamente", "id_venta": id_venta}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        db.close()
 
 @router.get("/inventario/variantes")
 def listar_variantes_inventario(
@@ -356,8 +372,10 @@ def listar_variantes_inventario(
 
     sql = f"""
         SELECT v.id AS id_variante, p.sku, p.nombre, p.categoria,
-               p.precio_costo, p.precio_venta, p.stock_minimo,
-               v.talla, v.color, v.stock_actual
+               COALESCE(v.precio_costo, p.precio_costo) AS precio_costo,
+               COALESCE(v.precio_venta, p.precio_venta) AS precio_venta,
+               p.stock_minimo,
+               v.talla, v.color, v.detalle, v.kg, v.lote, v.stock_actual
         FROM variantes v
         JOIN productos p ON p.sku = v.sku_producto
         {cond}{extra}
@@ -389,8 +407,11 @@ def _producto_o_404(db, sku: str):
 def detalle_producto(sku: str, db=Depends(get_db)):
     p = _producto_o_404(db, sku)
     variantes = db.execute(
-        "SELECT id, talla, color, stock_actual FROM variantes WHERE sku_producto = ? ORDER BY talla, color",
-        (sku,),
+        """SELECT id, talla, color, stock_actual,
+                  COALESCE(precio_costo, ?) AS precio_costo,
+                  COALESCE(precio_venta, ?) AS precio_venta
+           FROM variantes WHERE sku_producto = ? ORDER BY talla, color""",
+        (p["precio_costo"], p["precio_venta"], sku),
     ).fetchall()
     return {**dict(p), "variantes": [dict(v) for v in variantes]}
 
@@ -414,7 +435,12 @@ def editar_producto(sku: str, p: ProductoEdit, db=Depends(get_db), usuario: str 
     with transaccion(db):
         _producto_o_404(db, sku)
         db.execute(
-            "UPDATE productos SET nombre=?, categoria=?, precio_costo=?, precio_venta=?, stock_minimo=? WHERE sku=?",
+            """UPDATE productos
+               SET nombre=?, categoria=?,
+                   precio_costo=COALESCE(?, precio_costo),
+                   precio_venta=COALESCE(?, precio_venta),
+                   stock_minimo=?
+               WHERE sku=?""",
             (p.nombre, p.categoria, p.precio_costo, p.precio_venta, p.stock_minimo, sku),
         )
         auditar(db, usuario, f"Editó el producto {sku}")
@@ -439,7 +465,7 @@ def eliminar_producto(sku: str, db=Depends(get_db), usuario: str = Depends(usuar
 @router.post("/productos/{sku}/variantes", status_code=201)
 def crear_variante(sku: str, v: VarianteIn, db=Depends(get_db), usuario: str = Depends(usuario_actual)):
     with transaccion(db):
-        _producto_o_404(db, sku)
+        p = _producto_o_404(db, sku)
         repetida = db.execute(
             "SELECT 1 FROM variantes WHERE sku_producto = ? AND lower(talla) = lower(?) AND lower(color) = lower(?)",
             (sku, v.talla, v.color),
@@ -447,8 +473,9 @@ def crear_variante(sku: str, v: VarianteIn, db=Depends(get_db), usuario: str = D
         if repetida:
             raise HTTPException(409, f"Ya existe la variante {v.talla} / {v.color} para este producto.")
         cur = db.execute(
-            "INSERT INTO variantes (sku_producto, talla, color, stock_actual, id_sucursal) VALUES (?, ?, ?, 0, ?)",
-            (sku, v.talla, v.color, ALMACEN_ID),
+            """INSERT INTO variantes (sku_producto, talla, color, stock_actual, id_sucursal, precio_costo, precio_venta)
+               VALUES (?, ?, ?, 0, ?, ?, ?)""",
+            (sku, v.talla, v.color, ALMACEN_ID, p["precio_costo"], p["precio_venta"]),
         )
         id_variante = cur.lastrowid
         if v.stock_inicial > 0:
@@ -463,13 +490,14 @@ def _variante_o_404(db, id_variante: int):
         raise HTTPException(404, "La variante no existe.")
     return v
 
+
 @router.put("/variantes/{id_variante}")
 def editar_variante(id_variante: int, v: VarianteEdit, db=Depends(get_db), usuario: str = Depends(usuario_actual)):
     with transaccion(db):
         actual = _variante_o_404(db, id_variante)
         db.execute(
-            "UPDATE variantes SET color=?, detalle=?, kg=?, lote=? WHERE id=?",
-            (v.color, v.detalle or None, v.kg, v.lote or None, id_variante),
+            "UPDATE variantes SET color=?, detalle=?, kg=?, lote=?, precio_costo=?, precio_venta=? WHERE id=?",
+            (v.color, v.detalle or None, v.kg, v.lote or None, v.precio_costo, v.precio_venta, id_variante),
         )
         auditar(db, usuario, f"Editó la variante {id_variante} de {actual['sku_producto']}")
     return {"id": id_variante}
@@ -550,7 +578,7 @@ def ver_kardex(
 def obtener_kpis(db=Depends(get_db)):
     total_productos = db.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
     fila = db.execute(
-        """SELECT COALESCE(SUM(v.stock_actual * p.precio_costo), 0) AS valorizado,
+        """SELECT COALESCE(SUM(v.stock_actual * COALESCE(v.precio_costo, p.precio_costo)), 0) AS valorizado,
                   COALESCE(SUM(v.stock_actual), 0) AS unidades
            FROM variantes v JOIN productos p ON p.sku = v.sku_producto"""
     ).fetchone()
@@ -603,9 +631,9 @@ def obtener_kpis(db=Depends(get_db)):
         return [{"nombre": f["nombre"], "sku": f["sku"],
                  "ganancia": round(f["ganancia"], 2), "unidades": f["unidades"]} for f in filas]
 
-    hoy    = "date(v.fecha, 'localtime') = date('now', 'localtime')"
+    hoy = "date(v.fecha, 'localtime') = date('now', 'localtime')"
     semana = "date(v.fecha, 'localtime') >= date('now', 'localtime', '-6 days')"
-    mes    = "strftime('%Y-%m', v.fecha, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"
+    mes = "strftime('%Y-%m', v.fecha, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"
 
     return {
         "total_productos": total_productos,
@@ -616,48 +644,14 @@ def obtener_kpis(db=Depends(get_db)):
         "ganancia_diaria": round(max(0, ganancia_diaria), 2),
         "ganancia_semanal": round(max(0, ganancia_semanal), 2),
         "ganancia_mensual": round(max(0, ganancia_mensual), 2),
-        "top_diario":   top_producto(hoy),
-        "top_semanal":  top_producto(semana),
-        "top_mensual":  top_producto(mes),
-        "ganancia_por_producto_diaria":  ganancia_por_producto(hoy),
+        "top_diario": top_producto(hoy),
+        "top_semanal": top_producto(semana),
+        "top_mensual": top_producto(mes),
+        "ganancia_por_producto_diaria": ganancia_por_producto(hoy),
         "ganancia_por_producto_semanal": ganancia_por_producto(semana),
         "ganancia_por_producto_mensual": ganancia_por_producto(mes),
     }
-    
-def obtener_kpis(db=Depends(get_db)):
-    total_productos = db.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
-    fila = db.execute(
-        """SELECT COALESCE(SUM(v.stock_actual * p.precio_costo), 0) AS valorizado,
-                  COALESCE(SUM(v.stock_actual), 0) AS unidades
-           FROM variantes v JOIN productos p ON p.sku = v.sku_producto"""
-    ).fetchone()
-    alertas = productos_bajo_minimo(db)
 
-    ganancia_diaria = db.execute(
-        """SELECT COALESCE(SUM(ganancia_total), 0) FROM ventas
-           WHERE date(fecha, 'localtime') = date('now', 'localtime')"""
-    ).fetchone()[0]
-
-    ganancia_semanal = db.execute(
-        """SELECT COALESCE(SUM(ganancia_total), 0) FROM ventas
-           WHERE date(fecha, 'localtime') >= date('now', 'localtime', '-6 days')"""
-    ).fetchone()[0]
-
-    ganancia_mensual = db.execute(
-        """SELECT COALESCE(SUM(ganancia_total), 0) FROM ventas
-           WHERE strftime('%Y-%m', fecha, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"""
-    ).fetchone()[0]
-
-    return {
-        "total_productos": total_productos,
-        "unidades_totales": fila["unidades"],
-        "stock_valorizado": round(fila["valorizado"], 2),
-        "alertas_stock_bajo": len(alertas),
-        "detalle_alertas": alertas,
-        "ganancia_diaria": round(max(0, ganancia_diaria), 2),
-        "ganancia_semanal": round(max(0, ganancia_semanal), 2),
-        "ganancia_mensual": round(max(0, ganancia_mensual), 2),
-    }
 
 @router.get("/alertas")
 def ver_alertas(db=Depends(get_db)):
@@ -757,7 +751,6 @@ def eliminar_contacto(id_contacto: int, db=Depends(get_db), usuario: str = Depen
     return {"id": id_contacto}
 
 
-
 # ───────────────────────── Consulta DNI / RUC (proxy apisperu.com) ─────────────────────────
 @router.get("/consultar-documento")
 def consultar_documento(numero: str, db=Depends(get_db)):
@@ -799,16 +792,15 @@ def consultar_documento(numero: str, db=Depends(get_db)):
             "direccion": datos.get("direccion", ""),
             "raw": datos,
         }
-    else:
-        return {
-            "tipo": "ruc",
-            "numero": numero,
-            "nombre": datos.get("razonSocial", ""),
-            "direccion": datos.get("direccion", "") or datos.get("domicilioFiscal", ""),
-            "estado": datos.get("estado", ""),
-            "condicion": datos.get("condicion", ""),
-            "raw": datos,
-        }
+    return {
+        "tipo": "ruc",
+        "numero": numero,
+        "nombre": datos.get("razonSocial", ""),
+        "direccion": datos.get("direccion", "") or datos.get("domicilioFiscal", ""),
+        "estado": datos.get("estado", ""),
+        "condicion": datos.get("condicion", ""),
+        "raw": datos,
+    }
 
 
 app.include_router(router)

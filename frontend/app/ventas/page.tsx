@@ -13,6 +13,9 @@ import { useApi } from '@/hooks/useApi';
 import { useRouter } from 'next/navigation';
 import { EmptyState, ErrorState, TablaSkeleton } from '@/components/ui/States';
 
+const numeroComprobante = (v: ResultadoVenta) =>
+    `${v.serie || (v.tipo_comprobante === 'factura' ? 'F001' : 'B001')}-${String(v.numero ?? v.id).padStart(8, '0')}`;
+
 export default function VentasPage() {
     const router = useRouter();
     const [busqueda, setBusqueda] = useState('');
@@ -23,7 +26,7 @@ export default function VentasPage() {
 
     const ventasFiltradas = ventasPaginadas?.items.filter(v =>
         v.cliente_nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
-        `${v.serie}-${String(v.numero).padStart(6, '0')}`.toLowerCase().includes(busqueda.toLowerCase())
+        numeroComprobante(v).toLowerCase().includes(busqueda.toLowerCase())
     ) || [];
 
     const totalRecaudado = ventasFiltradas.reduce((acc, v) => acc + (v.total || 0), 0);
@@ -110,7 +113,7 @@ export default function VentasPage() {
                                     type="text"
                                     value={busqueda}
                                     onChange={(e) => setBusqueda(e.target.value)}
-                                    placeholder="Buscar por cliente o número de comprobante (ej. B001-000001)…"
+                                    placeholder="Buscar por cliente o número de comprobante (ej. B001-00000001)…"
                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition placeholder:text-slate-300"
                                 />
                             </div>
@@ -187,7 +190,7 @@ export default function VentasPage() {
                                                         {v.tipo_comprobante === 'boleta' ? 'BOL' : 'FAC'}
                                                     </span>
                                                     <span className="font-semibold text-slate-800 font-mono">
-                                                        {v.serie}-{String(v.numero).padStart(6, '0')}
+                                                        {numeroComprobante(v)}
                                                     </span>
                                                 </div>
                                             </td>

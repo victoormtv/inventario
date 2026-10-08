@@ -12,6 +12,7 @@ router = APIRouter(prefix="/api/ventas", dependencies=[Depends(usuario_actual)])
 
 SERIES = {"boleta": "B001", "factura": "F001"}
 IGV_TASA = 0.18
+TALLAS_NEUTRAS = {"", "-", "unico", "único", "unica", "única", "unidad"}
 
 
 class ItemVentaIn(BaseModel):
@@ -49,7 +50,7 @@ def _detalle_venta(db, id_venta: int) -> dict:
     if not v:
         raise HTTPException(404, "La venta no existe.")
     items = db.execute(
-        """SELECT sku_producto, descripcion, cantidad, precio_costo, precio_venta, ganancia,
+        """SELECT sku_producto, sku_producto AS codigo, descripcion, cantidad, precio_costo, precio_venta, ganancia,
                   unidad_medida, tipo_item, valor_unitario, igv
            FROM ventas_detalle WHERE id_venta = ?""",
         (id_venta,),
@@ -68,6 +69,7 @@ def crear_venta(v: VentaIn, db=Depends(get_db), usuario: str = Depends(usuario_a
     with transaccion(db):
         serie = SERIES[v.tipo_comprobante]
         numero = _siguiente_correlativo(db, serie)
+        etiqueta = f"{serie}-{numero:08d}"
 
         subtotal = 0.0
         ganancia_total = 0.0
@@ -77,10 +79,25 @@ def crear_venta(v: VentaIn, db=Depends(get_db), usuario: str = Depends(usuario_a
         for item in v.items:
             r = aplicar_movimiento(
                 db, item.id_variante, "SALIDA", item.cantidad,
-                f"Venta {serie}-{numero:06d}", usuario,
+                f"Venta {etiqueta}", usuario,
             )
-            producto = db.execute("SELECT precio_costo FROM productos WHERE sku = ?", (r["sku"],)).fetchone()
-            costo = producto["precio_costo"] or 0
+
+            # Costo propio de la variante (si no tiene, el del producto) + medida y color
+            var = db.execute(
+                """SELECT COALESCE(v.precio_costo, p.precio_costo) AS costo, v.talla, v.color
+                   FROM variantes v JOIN productos p ON p.sku = v.sku_producto
+                   WHERE v.id = ?""",
+                (item.id_variante,),
+            ).fetchone()
+            costo = (var["costo"] if var else 0) or 0
+
+            partes = [r["nombre"]]
+            if var and (var["talla"] or "").strip().lower() not in TALLAS_NEUTRAS:
+                partes.append(var["talla"].strip())
+            if var and (var["color"] or "").strip():
+                partes.append(var["color"].strip())
+            descripcion = " ".join(partes)
+
             sub = item.cantidad * item.precio_venta
             gan = (item.precio_venta - costo) * item.cantidad
             valor_unitario = round(item.precio_venta / (1 + IGV_TASA), 4)
@@ -88,7 +105,7 @@ def crear_venta(v: VentaIn, db=Depends(get_db), usuario: str = Depends(usuario_a
             subtotal += sub
             ganancia_total += gan
             igv_total += igv_linea
-            detalles.append((r["sku"], r["nombre"], item, costo, gan, valor_unitario, igv_linea))
+            detalles.append((r["sku"], descripcion, item, costo, gan, valor_unitario, igv_linea))
 
         total_final = max(0.0, subtotal - v.descuento)
         ganancia_neta = max(0.0, ganancia_total - v.descuento)
@@ -118,17 +135,17 @@ def crear_venta(v: VentaIn, db=Depends(get_db), usuario: str = Depends(usuario_a
         )
         id_venta = cur.lastrowid
 
-        for sku, nombre, item, costo, gan, valor_unitario, igv_linea in detalles:
+        for sku, descripcion, item, costo, gan, valor_unitario, igv_linea in detalles:
             db.execute(
                 """INSERT INTO ventas_detalle
                    (id_venta, id_variante, sku_producto, descripcion, cantidad, precio_costo, precio_venta, ganancia,
                     unidad_medida, tipo_item, valor_unitario, igv)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (id_venta, item.id_variante, sku, nombre, item.cantidad, costo, item.precio_venta, gan,
+                (id_venta, item.id_variante, sku, descripcion, item.cantidad, costo, item.precio_venta, gan,
                  item.unidad_medida, item.tipo_item, valor_unitario, igv_linea),
             )
 
-        auditar(db, usuario, f"Emitió {serie}-{numero:06d} a {cliente['nombre']} por S/ {total_final:.2f} ({v.metodo_pago})")
+        auditar(db, usuario, f"Emitió {etiqueta} a {cliente['nombre']} por S/ {total_final:.2f} ({v.metodo_pago})")
 
     return _detalle_venta(db, id_venta)
 

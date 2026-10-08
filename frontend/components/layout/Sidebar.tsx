@@ -5,6 +5,7 @@ import { FaChartPie, FaBoxOpen, FaExchangeAlt, FaFileAlt, FaAddressBook, FaWareh
 import { useApi } from '@/hooks/useApi';
 import { cerrarSesion } from '@/lib/session';
 import type { EstadoAlertas } from '@/types';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const links = [
     { href: '/', label: 'Dashboard', icon: FaChartPie },
@@ -48,19 +49,25 @@ export default function Sidebar({ usuario }: { usuario: string }) {
                 ))}
             </nav>
 
-            <div className="sidebar__user">
-                <div className="sidebar__avatar" aria-hidden="true">
-                    {usuario.charAt(0).toUpperCase()}
+            <div className="sidebar__footer mt-auto pt-3 border-t border-[var(--side-border,#2e3548)]">
+                <div className="px-3 pb-3">
+                    <ThemeToggle variante="sidebar" />
                 </div>
-                <div className="sidebar__who">
-                    <strong>{usuario}</strong>
-                    <button className="sidebar__logout" onClick={cerrarSesion} title="Cerrar sesión">
-                        <span className="sidebar__logout-text">Cerrar sesión</span>
+
+                <div className="sidebar__user">
+                    <div className="sidebar__avatar" aria-hidden="true">
+                        {usuario.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="sidebar__who">
+                        <strong>{usuario}</strong>
+                        <button className="sidebar__logout" onClick={cerrarSesion} title="Cerrar sesión">
+                            <span className="sidebar__logout-text">Cerrar sesión</span>
+                        </button>
+                    </div>
+                    <button className="icon-btn" onClick={cerrarSesion} aria-label="Cerrar sesión" style={{ color: 'var(--side-dim)', display: 'none' }}>
+                        <FaSignOutAlt />
                     </button>
                 </div>
-                <button className="icon-btn" onClick={cerrarSesion} aria-label="Cerrar sesión" style={{ color: 'var(--side-dim)', display: 'none' }}>
-                    <FaSignOutAlt />
-                </button>
             </div>
         </aside>
     );
