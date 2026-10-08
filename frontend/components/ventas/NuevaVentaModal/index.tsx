@@ -38,7 +38,8 @@ export default function NuevaVentaModal({ onCerrar, onEmitida }: NuevaVentaModal
             return [...c, {
                 id_variante: item.id_variante, sku: item.sku, nombre: item.nombre, talla: item.talla, color: item.color,
                 cantidad: 1, precio_costo: item.precio_costo, precio_registrado: item.precio_venta,
-                precio_venta: '', unidad_medida: 'NIU', tipo_item: 'bien',
+                precio_venta: item.precio_venta > 0 ? String(item.precio_venta) : '',
+                unidad_medida: 'NIU', tipo_item: 'bien',
             }];
         });
         setPickerAbierto(false);
