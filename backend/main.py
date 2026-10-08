@@ -388,12 +388,14 @@ def _producto_o_404(db, sku: str):
 @router.get("/productos/{sku}")
 def detalle_producto(sku: str, db=Depends(get_db)):
     p = _producto_o_404(db, sku)
+    pc = p["precio_costo"] or 0
+    pv = p["precio_venta"] or 0
     variantes = db.execute(
         """SELECT id, talla, color, stock_actual,
-                  COALESCE(NULLIF(precio_costo, 0), p.precio_costo) AS precio_costo,
-                  COALESCE(NULLIF(precio_venta, 0), p.precio_venta) AS precio_venta
-            FROM variantes WHERE sku_producto = ? ORDER BY talla, color""",
-        (p["precio_costo"], p["precio_venta"], sku),
+                  COALESCE(NULLIF(precio_costo, 0), ?) AS precio_costo,
+                  COALESCE(NULLIF(precio_venta, 0), ?) AS precio_venta
+           FROM variantes WHERE sku_producto = ? ORDER BY talla, color""",
+        (pc, pv, sku),
     ).fetchall()
     return {**dict(p), "variantes": [dict(v) for v in variantes]}
 
