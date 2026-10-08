@@ -9,4 +9,4 @@ bcrypt
 openpyxl
 reportlab
 pandas
-libsql-experimental
+libsql-client
