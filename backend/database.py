@@ -3,7 +3,12 @@ import sqlite3
 from contextlib import contextmanager
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("INVENTARIO_DB", os.path.join(BASE_DIR, "inventario.db"))
+
+# Detección de entorno Vercel: en Vercel solo la carpeta /tmp tiene permisos de escritura
+IS_VERCEL = os.environ.get("VERCEL") == "1"
+DEFAULT_DB_PATH = "/tmp/inventario.db" if IS_VERCEL else os.path.join(BASE_DIR, "inventario.db")
+
+DB_PATH = os.environ.get("INVENTARIO_DB", DEFAULT_DB_PATH)
 
 ALMACEN_ID = 1
 
@@ -17,7 +22,11 @@ def conectar() -> sqlite3.Connection:
     )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
+    
+    # En Vercel /tmp no soporta WAL mode correctamente
+    if not IS_VERCEL:
+        conn.execute("PRAGMA journal_mode = WAL")
+        
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
@@ -204,9 +213,9 @@ def inicializar_bd():
     _agregar_columna(cursor, "ventas", "id_vendedor", "INTEGER")
 
     # ── Nuevas columnas en variantes ──
-    _agregar_columna(cursor, "variantes", "detalle", "TEXT")   # Flexible, Extrafuerte, Interiores…
-    _agregar_columna(cursor, "variantes", "kg",      "REAL")   # peso del producto
-    _agregar_columna(cursor, "variantes", "lote",    "TEXT")   # número/código de lote
+    _agregar_columna(cursor, "variantes", "detalle", "TEXT")
+    _agregar_columna(cursor, "variantes", "kg",      "REAL")
+    _agregar_columna(cursor, "variantes", "lote",    "TEXT")
 
     # Índices
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_variantes_sku ON variantes(sku_producto)")

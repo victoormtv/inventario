@@ -75,8 +75,9 @@ inicializar_bd()
 cargar_seed()
 migrar_bd()
 
-app = FastAPI(title="API Sistema de Inventario", version="2.0")
+# ── MODIFICACIÓN EN MAIN.PY PARA VERCEL ──
 
+app = FastAPI(title="API Sistema de Inventario", version="2.0")
 
 def _planificador_reporte_mensual():
     while True:
@@ -84,11 +85,13 @@ def _planificador_reporte_mensual():
             verificar_y_enviar_reporte_mensual_automatico()
         except Exception:
             pass
-        time.sleep(14400)  # Revisa cada 4 horas
+        time.sleep(14400)
 
 
 @app.on_event("startup")
 def iniciar_planificador():
+    if os.environ.get("VERCEL") == "1":
+        return
     t = threading.Thread(target=_planificador_reporte_mensual, daemon=True)
     t.start()
 
