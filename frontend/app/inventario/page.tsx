@@ -3,20 +3,17 @@ import { useState } from 'react';
 import {
     FaBoxOpen, FaChartLine, FaEdit, FaLayerGroup,
     FaPlus, FaSync, FaTrash, FaSearch, FaFilter,
-    FaTag, FaRegCalendarCheck,
+    FaTag
 } from 'react-icons/fa';
 import { api } from '@/lib/api';
 import { moneda } from '@/lib/format';
 import { useApi } from '@/hooks/useApi';
 import type { Paginado, ProductoDetalle, ProductoResumen, Variante, VarianteInventario } from '@/types';
 import Button from '@/components/ui/Button';
-import Badge from '@/components/ui/Badge';
 import ConfirmarModal from '@/components/ui/ConfirmarModal';
 import { Callout, Field } from '@/components/ui/Form';
 import Modal from '@/components/ui/Modal';
-import { PageHeader, Panel, PanelHead } from '@/components/ui/Panel';
 import Pagination from '@/components/ui/Pagination';
-import SearchInput from '@/components/ui/SearchInput';
 import { EmptyState, ErrorState, TablaSkeleton } from '@/components/ui/States';
 import StockLevel from '@/components/ui/StockLevel';
 import { useToast } from '@/components/ui/Toast';
