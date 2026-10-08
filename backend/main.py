@@ -316,6 +316,44 @@ def listar_variantes_inventario(
 
     sql = f"""
         SELECT v.id AS id_variante, p.sku, p.nombre, p.categoria,
+               COALESCE(NULLIF(v.precio_costo, 0), p.precio_costo) AS precio_costo,
+               COALESCE(NULLIF(v.precio_venta, 0), p.precio_venta) AS precio_venta,
+               p.stock_minimo,
+               v.talla, v.color, v.detalle, v.kg, v.lote, v.stock_actual
+        FROM variantes v
+        JOIN productos p ON p.sku = v.sku_producto
+        {cond}{extra}
+    """
+    total = db.execute(f"SELECT COUNT(*) FROM ({sql})", params).fetchone()[0]
+    filas = db.execute(
+        sql + " ORDER BY p.nombre COLLATE NOCASE, v.talla COLLATE NOCASE, v.color COLLATE NOCASE LIMIT ? OFFSET ?",
+        params + [limit, (page - 1) * limit],
+    ).fetchall()
+    return {"items": [dict(f) for f in filas], "total": total, "page": page, "limit": limit}
+def listar_variantes_inventario(
+    q: str = "",
+    categoria: str = "",
+    estado: str = "",
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    db=Depends(get_db),
+):
+    where, params = [], []
+    if q.strip():
+        like = f"%{q.strip()}%"
+        where.append("(p.sku LIKE ? OR p.nombre LIKE ? OR v.talla LIKE ? OR v.color LIKE ?)")
+        params += [like, like, like, like]
+    if categoria:
+        where.append("p.categoria = ?")
+        params.append(categoria)
+
+    cond = (" WHERE " + " AND ".join(where)) if where else ""
+    extra = ""
+    if estado == "bajo":
+        extra = (" AND " if cond else " WHERE ") + "v.stock_actual <= p.stock_minimo"
+
+    sql = f"""
+        SELECT v.id AS id_variante, p.sku, p.nombre, p.categoria,
                COALESCE(v.precio_costo, p.precio_costo) AS precio_costo,
                COALESCE(v.precio_venta, p.precio_venta) AS precio_venta,
                p.stock_minimo,
@@ -352,8 +390,8 @@ def detalle_producto(sku: str, db=Depends(get_db)):
     p = _producto_o_404(db, sku)
     variantes = db.execute(
         """SELECT id, talla, color, stock_actual,
-                  COALESCE(precio_costo, ?) AS precio_costo,
-                  COALESCE(precio_venta, ?) AS precio_venta
+                  COALESCE(NULLIF(precio_costo, 0), ?) AS precio_costo,
+                  COALESCE(NULLIF(precio_venta, 0), ?) AS precio_venta
            FROM variantes WHERE sku_producto = ? ORDER BY talla, color""",
         (p["precio_costo"], p["precio_venta"], sku),
     ).fetchall()
