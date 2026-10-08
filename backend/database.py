@@ -10,6 +10,11 @@ DEFAULT_DB_PATH = "/tmp/inventario.db" if IS_VERCEL else os.path.join(BASE_DIR, 
 
 DB_PATH = os.environ.get("INVENTARIO_DB", DEFAULT_DB_PATH)
 
+import shutil
+_SEED = os.path.join(BASE_DIR, "inventario.db")
+if IS_VERCEL and not os.path.exists(DB_PATH) and os.path.exists(_SEED):
+    shutil.copy(_SEED, DB_PATH)
+
 ALMACEN_ID = 1
 
 
