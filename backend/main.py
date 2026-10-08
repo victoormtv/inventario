@@ -829,6 +829,14 @@ def consultar_documento(numero: str, db=Depends(get_db)):
         "raw": datos,
     }
 
+@app.get("/api/debug")
+def debug(db=Depends(get_db)):
+    return {
+        "admin_password_set": bool(os.environ.get("ADMIN_PASSWORD")),
+        "secret_set": bool(os.environ.get("INVENTARIO_SECRET")),
+        "vercel": os.environ.get("VERCEL"),
+        "usuarios": [r["usuario"] for r in db.execute("SELECT usuario FROM usuarios")],
+    }
 
 app.include_router(router)
 app.include_router(reportes_router)
