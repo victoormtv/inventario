@@ -1,0 +1,11 @@
+fastapi
+python-dotenv
+httpx
+requests
+pydantic
+python-multipart
+PyJWT
+bcrypt
+openpyxl
+reportlab
+pandas
