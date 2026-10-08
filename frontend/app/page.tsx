@@ -1,14 +1,15 @@
 'use client';
+
 import Link from 'next/link';
 import { FaSync } from 'react-icons/fa';
-import { useApi } from './lib/useApi';
-import type { KpiData, Movimiento, Paginado } from './lib/types';
-import AlertasTable from './components/dashboard/AlertasTable';
-import MetricsBand from './components/dashboard/MetricsBand';
-import KardexTable from './components/kardex/KardexTable';
-import Button from './components/ui/Button';
-import { PageHeader, Panel, PanelHead } from './components/ui/Panel';
-import { ErrorState, Skeleton, TablaSkeleton } from './components/ui/States';
+import { useApi } from '@/hooks/useApi';
+import type { KpiData, Movimiento, Paginado } from '@/types';
+import AlertasTable from '@/components/dashboard/AlertasTable';
+import MetricsBand from '@/components/dashboard/MetricsBand';
+import KardexTable from '@/components/kardex/KardexTable';
+import Button from '@/components/ui/Button';
+import { PageHeader, Panel, PanelHead } from '@/components/ui/Panel';
+import { ErrorState, Skeleton, TablaSkeleton } from '@/components/ui/States';
 
 export default function DashboardPage() {
   const kpis = useApi<KpiData>('/api/dashboard/kpis');

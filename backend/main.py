@@ -266,13 +266,10 @@ def listar_productos(
     return {"items": [dict(f) for f in filas], "total": total, "page": page, "limit": limit}
 
 @app.get("/api/usuarios", response_model=list[UsuarioResponse])
-def listar_usuarios():
-    db = get_db()
+def listar_usuarios(db=Depends(get_db)):
     cursor = db.cursor()
-    # Retorna la lista de usuarios para el selector de vendedores
-    cursor.execute("SELECT id, usuario, rol FROM usuarios ORDER BY usuario ASC")
+    cursor.execute("SELECT id, usuario, nombre, rol FROM usuarios ORDER BY usuario ASC")
     usuarios = [dict(row) for row in cursor.fetchall()]
-    db.close()
     return usuarios
 
 @app.post("/api/ventas")

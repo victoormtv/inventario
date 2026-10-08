@@ -5,14 +5,14 @@ import {
     FaUserPlus, FaSearch, FaUserTie, FaTruck, FaPhone, FaEnvelope,
     FaMapMarkerAlt, FaIdCard, FaEdit, FaTrash, FaBuilding, FaSync, FaFilter,
 } from 'react-icons/fa';
-import { api } from '../lib/api';
-import { useApi } from '../lib/useApi';
-import type { Contacto, Paginado } from '../lib/types';
-import ConfirmarModal from '../components/ui/ConfirmarModal';
-import Pagination from '../components/ui/Pagination';
-import { EmptyState, ErrorState } from '../components/ui/States';
-import { useToast } from '../components/ui/Toast';
-import ContactoModal from '../components/contactos/ContactoModal';
+import { api } from '@/lib/api';
+import { useApi } from '@/hooks/useApi';
+import type { Contacto, Paginado } from '@/types';
+import ConfirmarModal from '@/components/ui/ConfirmarModal';
+import Pagination from '@/components/ui/Pagination';
+import { EmptyState, ErrorState } from '@/components/ui/States';
+import { useToast } from '@/components/ui/Toast';
+import ContactoModal from '@/components/contactos/ContactoModal';
 
 function ContactoCard({ c, onEditar, onEliminar }: { c: Contacto; onEditar: () => void; onEliminar: () => void }) {
     const esCliente = c.tipo === 'cliente';

@@ -5,29 +5,35 @@ import {
     FaPlus, FaSync, FaTrash, FaSearch, FaFilter,
     FaTag, FaRegCalendarCheck,
 } from 'react-icons/fa';
-import { api } from '../lib/api';
-import { moneda } from '../lib/format';
-import { useApi } from '../lib/useApi';
-import type { Paginado, ProductoDetalle, ProductoResumen, Variante, VarianteInventario } from '../lib/types';
-import Button from '../components/ui/Button';
-import Badge from '../components/ui/Badge';
-import ConfirmarModal from '../components/ui/ConfirmarModal';
-import { Callout, Field } from '../components/ui/Form';
-import Modal from '../components/Modal';
-import { PageHeader, Panel, PanelHead } from '../components/ui/Panel';
-import Pagination from '../components/ui/Pagination';
-import SearchInput from '../components/ui/SearchInput';
-import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
-import StockLevel from '../components/ui/StockLevel';
-import { useToast } from '../components/ui/Toast';
-import IngresoMercaderiaModal from '../components/inventario/IngresoMercaderia';
-import HistorialPreciosModal from '../components/inventario/HistorialPreciosModal';
-import ProductoModal, { type VarianteEditable } from '../components/inventario/ProductoModal';
+import { api } from '@/lib/api';
+import { moneda } from '@/lib/format';
+import { useApi } from '@/hooks/useApi';
+import type { Paginado, ProductoDetalle, ProductoResumen, Variante, VarianteInventario } from '@/types';
+import Button from '@/components/ui/Button';
+import Badge from '@/components/ui/Badge';
+import ConfirmarModal from '@/components/ui/ConfirmarModal';
+import { Callout, Field } from '@/components/ui/Form';
+import Modal from '@/components/ui/Modal';
+import { PageHeader, Panel, PanelHead } from '@/components/ui/Panel';
+import Pagination from '@/components/ui/Pagination';
+import SearchInput from '@/components/ui/SearchInput';
+import { EmptyState, ErrorState, TablaSkeleton } from '@/components/ui/States';
+import StockLevel from '@/components/ui/StockLevel';
+import { useToast } from '@/components/ui/Toast';
+import IngresoMercaderiaModal from '@/components/inventario/IngresoMercaderia';
+import HistorialPreciosModal from '@/components/inventario/HistorialPreciosModal';
+import ProductoModal, { type VarianteEditable } from '@/components/inventario/ProductoModal';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 interface FormVariante { talla: string; color: string; stock_inicial: string; }
 const FORM_VAR_VACIO: FormVariante = { talla: '', color: '', stock_inicial: '0' };
 
-// ── Colores de categoría (mismo patrón que Reportes) ──────────────────────
 const CAT_COLOR: Record<string, { bg: string; text: string; border: string }> = {
     Pegamentos: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' },
     Fraguas: { bg: 'bg-teal-50', text: 'text-teal-700', border: 'border-teal-200' },
@@ -37,7 +43,6 @@ function catStyle(cat: string) {
     return CAT_COLOR[cat] ?? { bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200' };
 }
 
-// ── Pill de stock (semáforo visual) ───────────────────────────────────────
 function StockPill({ stock, minimo }: { stock: number; minimo: number }) {
     if (stock <= 0)
         return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-semibold bg-red-50 text-red-700 border-red-200">Sin stock</span>;
@@ -46,7 +51,6 @@ function StockPill({ stock, minimo }: { stock: number; minimo: number }) {
     return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-semibold bg-emerald-50 text-emerald-700 border-emerald-200">{stock} u.</span>;
 }
 
-// ── Modal variantes (mismo estilo tarjeta) ────────────────────────────────
 function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }) {
     const toast = useToast();
     const { data, loading, refetch } = useApi<ProductoDetalle>(`/api/productos/${sku}`);
@@ -151,7 +155,6 @@ function VariantesModal({ sku, onCerrar }: { sku: string; onCerrar: () => void }
     );
 }
 
-// ── Página principal ──────────────────────────────────────────────────────
 export default function InventarioPage() {
     const toast = useToast();
     const [q, setQ] = useState('');
@@ -196,7 +199,6 @@ export default function InventarioPage() {
         <div className="min-h-screen bg-slate-50">
             <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
 
-                {/* ── Header ── */}
                 <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                     <div>
                         <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1">Módulo de Inventario</p>
@@ -228,10 +230,8 @@ export default function InventarioPage() {
                     </div>
                 </div>
 
-                {/* ── Filtros ── */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-6 py-5">
                     <div className="flex flex-col sm:flex-row gap-4 items-end">
-                        {/* Búsqueda */}
                         <div className="flex-1 space-y-1.5">
                             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                                 <FaSearch className="text-indigo-400" />
@@ -249,34 +249,42 @@ export default function InventarioPage() {
                             </div>
                         </div>
 
-                        {/* Categoría */}
                         <div className="w-52 space-y-1.5">
                             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                                 <FaTag className="text-indigo-400" />
                                 Categoría
                             </label>
-                            <select
-                                value={categoria}
-                                onChange={e => cambiarFiltro(() => setCategoria(e.target.value))}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer">
-                                <option value="">Todas las categorías</option>
-                                {(cats.data ?? []).map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
+                            <Select value={categoria || 'todas'} onValueChange={(v) => cambiarFiltro(() => setCategoria(v === 'todas' || !v ? '' : v))}>
+                                <SelectTrigger
+                                    className="w-full bg-slate-50 border-slate-200 rounded-xl px-3.5 py-2.5 h-auto text-sm text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                                    style={{ width: '100%' }}
+                                >
+                                    <SelectValue placeholder="Todas las categorías" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="todas">Todas las categorías</SelectItem>
+                                    {(cats.data ?? []).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
                         </div>
 
-                        {/* Estado */}
                         <div className="w-48 space-y-1.5">
                             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                                 <FaFilter className="text-indigo-400" />
                                 Estado
                             </label>
-                            <select
-                                value={estado}
-                                onChange={e => cambiarFiltro(() => setEstado(e.target.value))}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer">
-                                <option value="">Todos</option>
-                                <option value="bajo">Solo bajo el mínimo</option>
-                            </select>
+                            <Select value={estado || 'todos'} onValueChange={(v) => cambiarFiltro(() => setEstado(v === 'todos' || !v ? '' : v))}>
+                                <SelectTrigger
+                                    className="w-full bg-slate-50 border-slate-200 rounded-xl px-3.5 py-2.5 h-auto text-sm text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                                    style={{ width: '100%' }}
+                                >
+                                    <SelectValue placeholder="Todos" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="todos">Todos</SelectItem>
+                                    <SelectItem value="bajo">Solo bajo el mínimo</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         {hayFiltros && (
@@ -289,10 +297,8 @@ export default function InventarioPage() {
                     </div>
                 </div>
 
-                {/* ── Tabla ── */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-                    {/* Cabecera del panel */}
                     <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                         <div>
                             <h2 className="font-bold text-slate-900 text-sm">Variantes en inventario</h2>
@@ -371,7 +377,7 @@ export default function InventarioPage() {
                                                     <td className="px-5 py-3.5 text-slate-600">{v.color}</td>
                                                     <td className="px-5 py-3.5">
                                                         {v.categoria
-                                                            ? <span className={`... ${catStyle(v.categoria ?? '').bg} ...`}>{v.categoria}</span>
+                                                            ? <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-xs font-semibold ${cs.bg} ${cs.text} ${cs.border}`}>{v.categoria}</span>
                                                             : <span className="text-slate-300">—</span>}
                                                     </td>
                                                     <td className="px-5 py-3.5 text-right text-slate-400 font-medium tabular-nums">{moneda(v.precio_costo)}</td>
@@ -414,7 +420,6 @@ export default function InventarioPage() {
                                 </table>
                             </div>
 
-                            {/* Footer con paginación */}
                             <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/50">
                                 <Pagination page={page} limit={LIMIT} total={lista.data.total} onPage={setPage} />
                             </div>
@@ -423,7 +428,6 @@ export default function InventarioPage() {
                 </div>
             </div>
 
-            {/* ── Modales ── */}
             {modalProducto && (
                 <ProductoModal
                     producto={modalProducto === 'nuevo' ? null : modalProducto.producto}

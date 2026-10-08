@@ -4,14 +4,25 @@ import {
     FaArrowRight, FaExchangeAlt, FaPlus, FaSearch,
     FaSync, FaFilter, FaCalendarAlt
 } from 'react-icons/fa';
-import { fechaLocal, hoy } from '../lib/format';
-import { useApi } from '../lib/useApi';
-import type { Movimiento, Paginado, ResultadoMovimiento } from '../lib/types';
-import Pagination from '../components/ui/Pagination';
-import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
-import MovimientoModal from '../components/kardex/MovimientoModal';
-import ResultadoModal from '../components/kardex/ResultadoModal';
-import { TEXTO } from '../components/kardex/constantes';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { fechaLocal, hoy } from '@/lib/format';
+import { useApi } from '@/hooks/useApi';
+import type { Movimiento, Paginado, ResultadoMovimiento } from '@/types';
+import Pagination from '@/components/ui/Pagination';
+import { EmptyState, ErrorState, TablaSkeleton } from '@/components/ui/States';
+import MovimientoModal from '@/components/kardex/MovimientoModal';
+import ResultadoModal from '@/components/kardex/ResultadoModal';
+import { TEXTO } from '@/components/kardex/constantes';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/Calendar';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 // Estilos dinámicos asegurando compatibilidad de firma de índice con `string`
 const TIPO_ESTILOS: Record<string, { bg: string; text: string; border: string }> = {
@@ -49,6 +60,17 @@ export default function KardexPage() {
         setModalNuevo(false);
         setResultado(r);
         lista.refetch();
+    };
+
+    const fechaDesdeObj = desde ? new Date(desde + 'T00:00:00') : undefined;
+    const fechaHastaObj = hasta ? new Date(hasta + 'T00:00:00') : undefined;
+
+    const formatearFecha = (d?: Date) => d ? format(d, "d 'de' MMMM, yyyy", { locale: es }) : 'Cualquier fecha';
+    const aIso = (d: Date) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
     };
 
     return (
@@ -108,46 +130,78 @@ export default function KardexPage() {
                                 <FaFilter className="text-indigo-400" />
                                 Tipo
                             </label>
-                            <select
-                                value={tipo}
-                                onChange={e => cambiarFiltro(() => setTipo(e.target.value))}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer">
-                                <option value="">Todos los tipos</option>
-                                <option value="ENTRADA">Entradas</option>
-                                <option value="SALIDA">Salidas</option>
-                                <option value="AJUSTE">Ajustes</option>
-                            </select>
+                            <Select value={tipo || 'todos'} onValueChange={(v) => cambiarFiltro(() => setTipo(v === 'todos' || !v ? '' : v))}>
+                                <SelectTrigger
+                                    className="w-full bg-slate-50 border-slate-200 rounded-xl px-3.5 py-2.5 h-auto text-sm text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                                    style={{ width: '100%' }}
+                                >
+                                    <SelectValue placeholder="Todos los tipos" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="todos">Todos los tipos</SelectItem>
+                                    <SelectItem value="ENTRADA">Entradas</SelectItem>
+                                    <SelectItem value="SALIDA">Salidas</SelectItem>
+                                    <SelectItem value="AJUSTE">Ajustes</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         {/* Fecha Desde */}
-                        <div className="w-full lg:w-40 space-y-1.5">
+                        <div className="w-full lg:w-44 space-y-1.5">
                             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                                 <FaCalendarAlt className="text-indigo-400" />
                                 Desde
                             </label>
-                            <input
-                                type="date"
-                                value={desde}
-                                max={hasta || hoy()}
-                                onChange={e => cambiarFiltro(() => setDesde(e.target.value))}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer"
-                            />
+                            <Popover>
+                                <PopoverTrigger
+                                    className="flex w-full items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 font-medium text-left hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer"
+                                    style={{ width: '100%' }}
+                                >
+                                    <span className="truncate">{formatearFecha(fechaDesdeObj)}</span>
+                                    <FaCalendarAlt className="text-indigo-400 text-xs shrink-0" />
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                    <Calendar
+                                        mode="single"
+                                        selected={fechaDesdeObj}
+                                        onSelect={(d) => {
+                                            if (!d) return;
+                                            cambiarFiltro(() => setDesde(aIso(d)));
+                                        }}
+                                        disabled={(d) => (hasta ? d > fechaHastaObj! : d > new Date())}
+                                        locale={es}
+                                    />
+                                </PopoverContent>
+                            </Popover>
                         </div>
 
                         {/* Fecha Hasta */}
-                        <div className="w-full lg:w-40 space-y-1.5">
+                        <div className="w-full lg:w-44 space-y-1.5">
                             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                                 <FaCalendarAlt className="text-indigo-400" />
                                 Hasta
                             </label>
-                            <input
-                                type="date"
-                                value={hasta}
-                                min={desde}
-                                max={hoy()}
-                                onChange={e => cambiarFiltro(() => setHasta(e.target.value))}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer"
-                            />
+                            <Popover>
+                                <PopoverTrigger
+                                    className="flex w-full items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 font-medium text-left hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer"
+                                    style={{ width: '100%' }}
+                                >
+                                    <span className="truncate">{formatearFecha(fechaHastaObj)}</span>
+                                    <FaCalendarAlt className="text-indigo-400 text-xs shrink-0" />
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                    <Calendar
+                                        mode="single"
+                                        selected={fechaHastaObj}
+                                        onSelect={(d) => {
+                                            if (!d) return;
+                                            cambiarFiltro(() => setHasta(aIso(d)));
+                                        }}
+                                        disabled={(d) => (desde ? d < fechaDesdeObj! : false) || d > new Date()}
+                                        locale={es}
+                                    />
+                                </PopoverContent>
+                            </Popover>
                         </div>
 
                         {hayFiltros && (

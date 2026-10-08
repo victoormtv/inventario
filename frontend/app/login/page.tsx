@@ -1,10 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { FaCheck, FaEye, FaEyeSlash, FaWarehouse, FaShieldAlt, FaBoxOpen } from 'react-icons/fa';
-import { api } from '../lib/api';
-import { guardarSesion } from '../lib/session';
-import Button from '../components/ui/Button';
-import { Callout } from '../components/ui/Form';
+import { api } from '@/lib/api';
+import { guardarSesion } from '@/lib/session';
+import Button from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Form';
 
 const BENEFICIOS = [
     'Avisos en tiempo real sobre productos por reponer.',

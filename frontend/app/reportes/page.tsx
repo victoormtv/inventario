@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 import {
     FaFileExcel,
     FaCalendarAlt,
@@ -17,7 +19,16 @@ import {
     FaLayerGroup,
     FaCheckCircle,
 } from 'react-icons/fa';
-import { api, descargar } from '../lib/api';
+import { api, descargar } from '@/lib/api';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/Calendar';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 type HojaExcel = 'dashboard' | 'kardex' | 'resumen' | 'stock' | 'ganancias';
 
@@ -166,6 +177,17 @@ export default function ReportesPage() {
 
     const totalHojas = hojasSeleccionadas.size;
 
+    const fechaDesdeObj = desde ? new Date(desde + 'T00:00:00') : undefined;
+    const fechaHastaObj = hasta ? new Date(hasta + 'T00:00:00') : undefined;
+
+    const formatearFecha = (d?: Date) => d ? format(d, "d 'de' MMMM, yyyy", { locale: es }) : 'Seleccionar fecha';
+    const aIso = (d: Date) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
     return (
         <div className="min-h-screen bg-slate-50">
             <div className="max-w-6xl mx-auto px-4 py-8 space-y-8">
@@ -174,7 +196,7 @@ export default function ReportesPage() {
                 <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                     <div>
                         <p className="text-xs font-semibold text-indigo-600 uppercase tracking-widest mb-1">Módulo de Reportes</p>
-                        <h1 className="text-3xl font-black text-slate-900 leading-tight">Exportación Excel Pro</h1>
+                        <h1 className="text-3xl font-black text-slate-900 leading-tight">Exportación Excel</h1>
                         <p className="text-slate-500 text-sm mt-1.5 max-w-lg">
                             Genera libros Excel profesionales con dashboard ejecutivo, kardex, rentabilidad y stock — todo en un solo archivo.
                         </p>
@@ -224,8 +246,8 @@ export default function ReportesPage() {
                                             </div>
                                         </div>
                                         <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${activa
-                                                ? `border-indigo-500 bg-indigo-500 text-white`
-                                                : 'border-slate-200 bg-white'
+                                            ? `border-indigo-500 bg-indigo-500 text-white`
+                                            : 'border-slate-200 bg-white'
                                             }`}>
                                             {activa && <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                                         </div>
@@ -271,8 +293,8 @@ export default function ReportesPage() {
                                         type="button"
                                         onClick={() => aplicarPreset(p.key)}
                                         className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-all duration-150 cursor-pointer ${presetActivo === p.key
-                                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20'
-                                                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20'
+                                            : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                                             }`}>
                                         {p.label}
                                     </button>
@@ -287,33 +309,61 @@ export default function ReportesPage() {
                                 Filtros de datos
                             </h3>
 
-                            {/* Fechas */}
+                            {/* Fechas — Popover + Calendar (shadcn) */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1.5">
                                     <label className="block text-xs font-semibold text-slate-600 flex items-center gap-1.5">
                                         <FaRegCalendarCheck className="text-indigo-400" />
                                         Desde
                                     </label>
-                                    <input
-                                        type="date"
-                                        value={desde}
-                                        onChange={(e) => { setDesde(e.target.value); setPresetActivo('personalizado'); }}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                                        required
-                                    />
+                                    <Popover>
+                                        <PopoverTrigger
+                                            className="flex w-full items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium text-left hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer"
+                                            style={{ width: '100%' }}
+                                        >
+                                            <span className="truncate">{formatearFecha(fechaDesdeObj)}</span>
+                                            <FaCalendarAlt className="text-indigo-400 text-xs shrink-0" />
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start">
+                                            <Calendar
+                                                mode="single"
+                                                selected={fechaDesdeObj}
+                                                onSelect={(d) => {
+                                                    if (!d) return;
+                                                    setDesde(aIso(d));
+                                                    setPresetActivo('personalizado');
+                                                }}
+                                                locale={es}
+                                            />
+                                        </PopoverContent>
+                                    </Popover>
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="block text-xs font-semibold text-slate-600 flex items-center gap-1.5">
                                         <FaRegCalendarCheck className="text-indigo-400" />
                                         Hasta
                                     </label>
-                                    <input
-                                        type="date"
-                                        value={hasta}
-                                        onChange={(e) => { setHasta(e.target.value); setPresetActivo('personalizado'); }}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-                                        required
-                                    />
+                                    <Popover>
+                                        <PopoverTrigger
+                                            className="flex w-full items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium text-left hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer"
+                                            style={{ width: '100%' }}
+                                        >
+                                            <span className="truncate">{formatearFecha(fechaHastaObj)}</span>
+                                            <FaCalendarAlt className="text-indigo-400 text-xs shrink-0" />
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start">
+                                            <Calendar
+                                                mode="single"
+                                                selected={fechaHastaObj}
+                                                onSelect={(d) => {
+                                                    if (!d) return;
+                                                    setHasta(aIso(d));
+                                                    setPresetActivo('personalizado');
+                                                }}
+                                                locale={es}
+                                            />
+                                        </PopoverContent>
+                                    </Popover>
                                 </div>
                             </div>
 
@@ -337,15 +387,20 @@ export default function ReportesPage() {
                                         <FaTag className="text-indigo-400" />
                                         Categoría
                                     </label>
-                                    <select
-                                        value={categoria}
-                                        onChange={(e) => setCategoria(e.target.value)}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition cursor-pointer">
-                                        <option value="">Todas las categorías</option>
-                                        {categorias.map((cat) => (
-                                            <option key={cat} value={cat}>{cat}</option>
-                                        ))}
-                                    </select>
+                                    <Select value={categoria || 'todas'} onValueChange={(v) => setCategoria(v === 'todas' || !v ? '' : v)}>
+                                        <SelectTrigger
+                                            className="w-full bg-slate-50 border-slate-200 rounded-xl px-3.5 py-2.5 h-auto text-sm text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                                            style={{ width: '100%' }}
+                                        >
+                                            <SelectValue placeholder="Todas las categorías" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="todas">Todas las categorías</SelectItem>
+                                            {categorias.map((cat) => (
+                                                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                             </div>
                         </div>
@@ -396,7 +451,7 @@ export default function ReportesPage() {
                             ) : (
                                 <>
                                     <FaDownload className="text-lg" />
-                                    <span>Descargar Excel Pro</span>
+                                    <span>Descargar Excel</span>
                                     <span className="ml-auto bg-white/20 text-white text-xs font-bold px-2.5 py-1 rounded-lg">
                                         {totalHojas} hojas
                                     </span>

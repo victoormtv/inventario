@@ -4,14 +4,14 @@ import {
     FaChartLine, FaEye, FaPlus, FaSearch, FaSync,
     FaFileInvoice, FaDollarSign, FaCoins,
 } from 'react-icons/fa';
-import { moneda } from '../lib/format';
-import type { Paginado, ResultadoVenta } from '../lib/types';
-import Button from '../components/ui/Button';
-import ComprobanteImprimible from '../components/ventas/ComprobanteImprimible';
-import NuevaVentaModal from '../components/ventas/NuevaVentaModal';
-import { useApi } from '../lib/useApi';
+import { moneda } from '@/lib/format';
+import type { Paginado, ResultadoVenta } from '@/types';
+import Button from '@/components/ui/Button';
+import ComprobanteImprimible from '@/components/ventas/ComprobanteImprimible';
+import NuevaVentaModal from '@/components/ventas/NuevaVentaModal';
+import { useApi } from '@/hooks/useApi';
 import { useRouter } from 'next/navigation';
-import { EmptyState, ErrorState, TablaSkeleton } from '../components/ui/States';
+import { EmptyState, ErrorState, TablaSkeleton } from '@/components/ui/States';
 
 export default function VentasPage() {
     const router = useRouter();
