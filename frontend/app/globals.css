@@ -7,17 +7,17 @@
 
 /* ───────────── Paleta de marca (reemplaza indigo-* de Tailwind) ───────────── */
 @theme {
-  --color-indigo-50: #fff8ee;
-  --color-indigo-100: #ffefd6;
-  --color-indigo-200: #ffd792;
-  --color-indigo-300: #ffae6a;
-  --color-indigo-400: #ff8243;
-  --color-indigo-500: #e26a2c;
-  --color-indigo-600: #c65314;
-  --color-indigo-700: #a64410;
-  --color-indigo-800: #84360d;
-  --color-indigo-900: #662a0b;
-  --color-indigo-950: #3d1806;
+  --color-indigo-50: #fff8e6;
+  --color-indigo-100: #ffedc2;
+  --color-indigo-200: #ffdb85;
+  --color-indigo-300: #ffc54d;
+  --color-indigo-400: #ffb41f;
+  --color-indigo-500: #ffa500;
+  --color-indigo-600: #ffa500;
+  --color-indigo-700: #e69500;
+  --color-indigo-800: #b87600;
+  --color-indigo-900: #8a5800;
+  --color-indigo-950: #4d3100;
 }
 
 /* ───────────── Tokens ───────────── */
@@ -34,9 +34,9 @@
   --ink-3: #7a8a9a;
 
   /* Marca */
-  --brand: #c65314;
-  --brand-strong: #a64410;
-  --brand-tint: #fff3e3;
+  --brand: #ffa500;
+  --brand-strong: #ffb41f;
+  --brand-tint: rgba(255, 165, 0, 0.15);
 
   /* Estados */
   --warn: #a16207;
@@ -2183,9 +2183,9 @@ body {
   --ink-3: #94a3b8;
 
   /* Colores de Marca y Estados adaptados */
-  --brand: #e26a2c;
-  --brand-strong: #ff8243;
-  --brand-tint: rgba(255, 130, 67, 0.15);
+  --brand: #ffa500;
+  --brand-strong: #e69500;
+  --brand-tint: #fff4dc;
 
   --warn: #fbbf24;
   --warn-tint: rgba(251, 191, 36, 0.15);
@@ -2257,4 +2257,14 @@ body {
 [data-slot="select-positioner"],
 [data-radix-popper-content-wrapper] {
   z-index: 200 !important;
+}
+
+.btn--primary,
+.bg-indigo-600,
+.bg-indigo-700 {
+  color: #1a1100 !important;
+}
+
+.hover\:bg-indigo-700:hover {
+  background-color: #e69500 !important;
 }
