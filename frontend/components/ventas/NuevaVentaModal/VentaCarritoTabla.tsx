@@ -46,7 +46,6 @@ export function VentaCarritoTabla({
     igvTotal,
     gananciaTotal,
 }: Props) {
-
     return (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
