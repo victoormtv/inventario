@@ -1,9 +1,7 @@
 """Registro de ventas: boletas y facturas (fake por ahora, para imprimir localmente)."""
-import html
 import os
 import re
 import smtplib
-from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Literal
 
@@ -11,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from auth import usuario_actual
+from comprobante import generar_pdf, html_comprobante
 from database import get_db, transaccion
 from servicios import aplicar_movimiento, auditar
 
@@ -21,7 +20,6 @@ IGV_TASA = 0.18
 TALLAS_NEUTRAS = {"", "-", "unico", "único", "unica", "única", "unidad"}
 # Roles que pueden editar / eliminar ventas
 ROLES_EDICION = {"admin"}
-LIMA = timezone(timedelta(hours=-5))
 
 
 class ItemVentaIn(BaseModel):
@@ -80,16 +78,6 @@ def _etiqueta(v) -> str:
     return f"{serie}-{int(v['numero'] or v['id']):08d}"
 
 
-def _fecha_lima(f) -> str:
-    try:
-        d = datetime.fromisoformat(str(f).replace(" ", "T").replace("Z", "+00:00"))
-        if d.tzinfo is None:
-            d = d.replace(tzinfo=timezone.utc)
-        return d.astimezone(LIMA).strftime("%d/%m/%Y %H:%M")
-    except Exception:
-        return str(f)
-
-
 def _detalle_venta(db, id_venta: int) -> dict:
     v = db.execute(
         """SELECT ve.*, t.nombre AS cliente_nombre, t.documento AS cliente_documento,
@@ -124,51 +112,6 @@ def _descripcion_y_costo(db, id_variante: int, nombre: str):
     if var and (var["color"] or "").strip():
         partes.append(var["color"].strip())
     return " ".join(partes), costo
-
-
-def _html_comprobante(v: dict) -> str:
-    etiqueta = _etiqueta(v)
-    tipo = "FACTURA ELECTRÓNICA" if v["tipo_comprobante"] == "factura" else "BOLETA DE VENTA ELECTRÓNICA"
-    celda = "padding:8px 6px;border-bottom:1px solid #eee"
-    filas = "".join(
-        f"<tr><td style='{celda}'>{html.escape(i['descripcion'] or '')}</td>"
-        f"<td style='{celda};text-align:center'>{i['cantidad']}</td>"
-        f"<td style='{celda};text-align:right'>S/ {i['precio_venta']:.2f}</td>"
-        f"<td style='{celda};text-align:right'>S/ {i['cantidad'] * i['precio_venta']:.2f}</td></tr>"
-        for i in v["items"]
-    )
-    total = v["total"] or 0
-    gravada = total / (1 + IGV_TASA)
-    igv = total - gravada
-    desc = (
-        f"<p style='margin:2px 0'>Descuento: -S/ {v['descuento']:.2f}</p>" if v.get("descuento") else ""
-    )
-    return f"""
-    <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#1e293b">
-      <h3 style="margin:0">INVERSIONES NATHAN S.R.L</h3>
-      <p style="margin:2px 0;font-size:12px;color:#64748b">RUC 20610124616 · Telf. 950 549 676</p>
-      <hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0">
-      <p style="margin:0;font-size:11px;color:#64748b">{tipo}</p>
-      <p style="margin:2px 0;font-size:22px;font-weight:bold">{etiqueta}</p>
-      <p style="margin:2px 0">Fecha: {_fecha_lima(v['fecha'])}</p>
-      <p style="margin:2px 0">Cliente: {html.escape(v.get('cliente_nombre') or 'Cliente General')}</p>
-      <p style="margin:2px 0">Documento: {html.escape(v.get('cliente_documento') or '-')}</p>
-      <table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px">
-        <thead><tr style="background:#f1f5f9">
-          <th style="padding:8px 6px;text-align:left">Descripción</th>
-          <th style="padding:8px 6px">Cant.</th>
-          <th style="padding:8px 6px;text-align:right">P. Unit.</th>
-          <th style="padding:8px 6px;text-align:right">Importe</th>
-        </tr></thead><tbody>{filas}</tbody>
-      </table>
-      <div style="text-align:right;margin-top:12px;font-size:14px">
-        <p style="margin:2px 0">Op. gravada: S/ {gravada:.2f}</p>
-        <p style="margin:2px 0">IGV 18%: S/ {igv:.2f}</p>
-        {desc}
-        <p style="margin:6px 0;font-size:18px;font-weight:bold">TOTAL: S/ {total:.2f}</p>
-      </div>
-      <p style="margin-top:24px;font-size:12px;color:#64748b">¡Gracias por su preferencia!</p>
-    </div>"""
 
 
 @router.post("", status_code=201)
@@ -368,8 +311,16 @@ def enviar_comprobante(id_venta: int, d: EnviarCorreoIn, db=Depends(get_db), usu
     msg["Subject"] = f"Comprobante {etiqueta} - INVERSIONES NATHAN S.R.L"
     msg["From"] = os.environ.get("SMTP_FROM", user)
     msg["To"] = email
-    msg.set_content(f"Comprobante {etiqueta} por S/ {v['total']:.2f}. Abre este correo en un cliente que soporte HTML.")
-    msg.add_alternative(_html_comprobante(v), subtype="html")
+    msg.set_content(
+        f"Adjuntamos su comprobante {etiqueta} por S/ {v['total']:.2f}.\n\nINVERSIONES NATHAN S.R.L"
+    )
+    msg.add_alternative(html_comprobante(v, etiqueta), subtype="html")
+    msg.add_attachment(
+        generar_pdf(v, etiqueta),
+        maintype="application",
+        subtype="pdf",
+        filename=f"{etiqueta}.pdf",
+    )
 
     try:
         if puerto == 465:
