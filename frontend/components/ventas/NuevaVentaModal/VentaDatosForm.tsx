@@ -3,13 +3,6 @@
 import { FaUser, FaUserTie } from 'react-icons/fa';
 import type { Contacto } from '@/types';
 import { useApi } from '@/hooks/useApi';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
 import ClienteSelector from '../ClienteSelector';
 import type { UsuarioVendedor } from './types';
 
@@ -25,7 +18,6 @@ const etiquetaVendedor = (u: UsuarioVendedor) => (u.nombre ? `${u.nombre} (@${u.
 export function VentaDatosForm({ cliente, onClienteChange, vendedorId, onVendedorIdChange }: Props) {
     const { data: usuarios } = useApi<UsuarioVendedor[]>('/api/usuarios');
     const lista = usuarios || [];
-    const elegido = lista.find((u) => String(u.id) === vendedorId);
 
     return (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -46,31 +38,18 @@ export function VentaDatosForm({ cliente, onClienteChange, vendedorId, onVendedo
                     <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-wider">
                         <FaUserTie className="text-indigo-500" /> Vendedor asignado *
                     </label>
-                    <Select
+                    <select
                         value={vendedorId}
-                        onValueChange={(v) => onVendedorIdChange(v ?? '')}
+                        onChange={(e) => onVendedorIdChange(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
                     >
-                        <SelectTrigger
-                            className="w-full bg-slate-50 border-slate-200 rounded-xl px-3.5 py-2.5 h-auto text-sm text-slate-800 font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
-                            style={{ width: '100%' }}
-                        >
-                            <SelectValue placeholder="Seleccionar vendedor...">
-                                {elegido ? etiquetaVendedor(elegido) : undefined}
-                            </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                            {lista.map((u) => (
-                                <SelectItem key={u.id} value={String(u.id)}>
-                                    <span className="flex items-center gap-2">
-                                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold uppercase text-indigo-600">
-                                            {(u.nombre || u.usuario).charAt(0)}
-                                        </span>
-                                        {etiquetaVendedor(u)}
-                                    </span>
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                        <option value="">Seleccionar vendedor...</option>
+                        {lista.map((u) => (
+                            <option key={u.id} value={String(u.id)}>
+                                {etiquetaVendedor(u)}
+                            </option>
+                        ))}
+                    </select>
                 </div>
             </div>
         </div>
