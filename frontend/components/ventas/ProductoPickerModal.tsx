@@ -22,9 +22,11 @@ export default function ProductoPickerModal({ onAgregar, onCerrar }: Props) {
     const { data: productos, loading } = useApi<Paginado<ProductoResumen>>(`/api/productos?q=${encodeURIComponent(q)}&limit=50`);
     const { data: detalle } = useApi<ProductoDetalle>(skuAbierto ? `/api/productos/${skuAbierto}` : null);
 
+    const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+
     return (
-        <Modal abierto onCerrar={onCerrar} titulo="Agregar producto" subtitulo="Busca y elige la variante a vender" ancho>
-            <SearchInput valor={q} onCambio={setQ} placeholder="Buscar por SKU o nombre…" />
+        <Modal abierto onCerrar={onCerrar} titulo="Agregar producto" subtitulo="Busca por nombre, SKU, color o talla" ancho>
+            <SearchInput valor={q} onCambio={setQ} placeholder="Buscar por SKU, nombre, color o talla…" />
 
             <div style={{ marginTop: 16, maxHeight: 420, overflowY: 'auto' }}>
                 {loading ? (
@@ -32,49 +34,61 @@ export default function ProductoPickerModal({ onAgregar, onCerrar }: Props) {
                 ) : !productos?.items.length ? (
                     <p style={{ color: 'var(--ink-2)', fontSize: 14, padding: '20px 0' }}>Sin resultados.</p>
                 ) : (
-                    productos.items.map((p) => (
-                        <div key={p.sku} className="picker-row">
-                            <button type="button" className="picker-row__head" onClick={() => setSkuAbierto(skuAbierto === p.sku ? null : p.sku)}>
-                                <div>
-                                    <div className="picker-row__nombre">{p.nombre}</div>
-                                    <div className="picker-row__sku">{p.sku} · stock {p.stock_total}</div>
-                                </div>
-                            </button>
+                    productos.items.map((p) => {
+                        const textoProducto = `${p.sku} ${p.nombre}`.toLowerCase();
+                        const variantes = detalle?.variantes ?? [];
+                        const filtradas = tokens.length
+                            ? variantes.filter((v) => {
+                                const textoVariante = `${v.talla} ${v.color}`.toLowerCase();
+                                return tokens.every((t) => textoProducto.includes(t) || textoVariante.includes(t));
+                            })
+                            : variantes;
+                        const lista = filtradas.length ? filtradas : variantes;
 
-                            {skuAbierto === p.sku && (
-                                <div className="picker-row__variantes">
-                                    {!detalle ? (
-                                        <TablaSkeleton filas={2} />
-                                    ) : detalle.variantes.length === 0 ? (
-                                        <p style={{ fontSize: 12, color: 'var(--ink-2)' }}>Sin variantes.</p>
-                                    ) : (
-                                        detalle.variantes.map((v) => {
-                                            const costo = v.precio_costo || p.precio_costo || 0;
-                                            const venta = v.precio_venta || p.precio_venta || 0;
-                                            return (
-                                                <div key={v.id} className="picker-variante">
-                                                    <span>{v.talla} / {v.color}</span>
-                                                    <span className="muted">costo {moneda(costo)} · venta {moneda(venta)}</span>
-                                                    <span className={v.stock_actual <= 0 ? 'stock-now' : 'muted'}>stock: {v.stock_actual}</span>
-                                                    <Button
-                                                        variante="primario"
-                                                        disabled={v.stock_actual <= 0}
-                                                        onClick={() => onAgregar({
-                                                            sku: p.sku, nombre: p.nombre, id_variante: v.id,
-                                                            talla: v.talla, color: v.color,
-                                                            precio_costo: costo, precio_venta: venta,
-                                                        })}
-                                                        icono={<FaPlus style={{ fontSize: 10 }} />}>
-                                                        Agregar
-                                                    </Button>
-                                                </div>
-                                            );
-                                        })
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    ))
+                        return (
+                            <div key={p.sku} className="picker-row">
+                                <button type="button" className="picker-row__head" onClick={() => setSkuAbierto(skuAbierto === p.sku ? null : p.sku)}>
+                                    <div>
+                                        <div className="picker-row__nombre">{p.nombre}</div>
+                                        <div className="picker-row__sku">{p.sku} · {p.num_variantes} variante(s) · stock {p.stock_total}</div>
+                                    </div>
+                                </button>
+
+                                {skuAbierto === p.sku && (
+                                    <div className="picker-row__variantes">
+                                        {!detalle ? (
+                                            <TablaSkeleton filas={2} />
+                                        ) : lista.length === 0 ? (
+                                            <p style={{ fontSize: 12, color: 'var(--ink-2)' }}>Sin variantes.</p>
+                                        ) : (
+                                            lista.map((v) => {
+                                                const costo = v.precio_costo || p.precio_costo || 0;
+                                                const venta = v.precio_venta || p.precio_venta || 0;
+                                                return (
+                                                    <div key={v.id} className="picker-variante">
+                                                        <span>{v.talla} / {v.color}</span>
+                                                        <span className="muted">costo {moneda(costo)} · venta {moneda(venta)}</span>
+                                                        <span className={v.stock_actual <= 0 ? 'stock-now' : 'muted'}>stock: {v.stock_actual}</span>
+                                                        <Button
+                                                            variante="primario"
+                                                            disabled={v.stock_actual <= 0}
+                                                            onClick={() => onAgregar({
+                                                                sku: p.sku, nombre: p.nombre, id_variante: v.id,
+                                                                talla: v.talla, color: v.color,
+                                                                precio_costo: costo, precio_venta: venta,
+                                                            })}
+                                                            icono={<FaPlus style={{ fontSize: 10 }} />}>
+                                                            Agregar
+                                                        </Button>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })
                 )}
             </div>
         </Modal>

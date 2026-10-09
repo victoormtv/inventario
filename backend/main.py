@@ -251,8 +251,49 @@ def yo(usuario: str = Depends(usuario_actual)):
     return {"usuario": usuario}
 
 
-# ───────────────────────── Productos ─────────────────────────
 @router.get("/productos")
+def listar_productos(
+    q: str = "",
+    categoria: str = "",
+    estado: str = "",
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=200),
+    db=Depends(get_db),
+):
+    where, params = [], []
+    for token in q.split():
+        like = f"%{token}%"
+        where.append(
+            """(p.sku LIKE ? OR p.nombre LIKE ? OR EXISTS (
+                   SELECT 1 FROM variantes vx
+                   WHERE vx.sku_producto = p.sku
+                     AND (vx.color LIKE ? OR vx.talla LIKE ? OR vx.detalle LIKE ?)
+               ))"""
+        )
+        params += [like, like, like, like, like]
+    if categoria:
+        where.append("p.categoria = ?")
+        params.append(categoria)
+
+    sql = """
+        SELECT p.sku, p.nombre, p.categoria, p.precio_costo, p.precio_venta, p.stock_minimo,
+               COALESCE(SUM(v.stock_actual), 0) AS stock_total,
+               COUNT(v.id) AS num_variantes
+        FROM productos p
+        LEFT JOIN variantes v ON v.sku_producto = p.sku
+    """
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " GROUP BY p.sku"
+    if estado == "bajo":
+        sql += " HAVING stock_total <= p.stock_minimo"
+
+    total = db.execute(f"SELECT COUNT(*) FROM ({sql})", params).fetchone()[0]
+    filas = db.execute(
+        sql + " ORDER BY p.nombre COLLATE NOCASE LIMIT ? OFFSET ?",
+        params + [limit, (page - 1) * limit],
+    ).fetchall()
+    return {"items": [dict(f) for f in filas], "total": total, "page": page, "limit": limit}
 def listar_productos(
     q: str = "",
     categoria: str = "",

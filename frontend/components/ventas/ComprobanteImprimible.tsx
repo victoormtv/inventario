@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { FaPrint, FaTimes, FaFileInvoice } from 'react-icons/fa';
+import { FaPrint, FaTimes, FaFileInvoice, FaDownload } from 'react-icons/fa';
 import type { ResultadoVenta } from '@/types';
 import Button from '@/components/ui/Button';
 
@@ -9,8 +9,8 @@ const EMPRESA = {
     nombre: 'INVERSIONES NATHAN S.R.L',
     ruc: '20610124616',
     direccion: 'CALLE SANTA CARMELA 337 URB. PALAO ET. 2',
-    telefonos: '950  549 676',
-    giro: 'VENTA DE PEGAMENTOS, PORCELANATOS, PISOS, MAYÓLICAS NACIONALES E IMPORTADOS, SANITARIOS Y GRIFERÍA EN GENERALL',
+    telefonos: '950 549 676',
+    giro: 'Venta de pegamentos, porcelanatos, pisos, mayólicas nacionales e importados, sanitarios y grifería en general',
     logo: '' as string,
     terminos: [
         'No se aceptan cambios ni devoluciones después de emitida la mercadería.',
@@ -79,7 +79,7 @@ type ItemExtra = { unidad_medida?: string; codigo?: string };
 
 export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
     const esFactura = venta.tipo_comprobante === 'factura';
-    const tituloDoc = esFactura ? 'FACTURA ELECTRÓNICA' : 'BOLETA DE VENTA ELECTRÓNICA';
+    const tituloDoc = esFactura ? 'Factura electrónica' : 'Boleta de venta electrónica';
     const numeroDoc = `${venta.serie || (esFactura ? 'F001' : 'B001')}-${String(venta.numero || 1).padStart(8, '0')}`;
     const fecha = venta.fecha
         ? new Date(venta.fecha).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -88,23 +88,21 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
     const total = venta.total || 0;
     const opGravadas = total / (1 + IGV_TASA);
     const igv = total - opGravadas;
+    const descuento = venta.descuento || 0;
     const metodo = (venta.metodo_pago || 'Efectivo').toUpperCase();
     const docCliente = venta.cliente_documento;
 
     const barraRef = useRef<HTMLDivElement>(null);
     const hojaRef = useRef<HTMLDivElement>(null);
     const [escala, setEscala] = useState(1);
-    const [, setAltoBarra] = useState(64);
+    const [descargando, setDescargando] = useState(false);
 
     useEffect(() => {
         const calcularEscala = () => {
-            const hoja = hojaRef.current;
-            if (!hoja) return;
+            if (!hojaRef.current) return;
             const hW = 794;
             const hH = 1123;
             const aBarra = barraRef.current?.offsetHeight ?? 64;
-            setAltoBarra(aBarra);
-
             const dispW = window.innerWidth - 32;
             const dispH = window.innerHeight - aBarra - 32;
             setEscala(Math.min(1, dispW / hW, dispH / hH));
@@ -115,18 +113,35 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
         return () => window.removeEventListener('resize', calcularEscala);
     }, [venta]);
 
-    const filasTotales: { label: string; valor: number; negativo?: boolean }[] = [
-        { label: 'OP. GRAVADAS', valor: opGravadas },
-        { label: 'OP. INAFECTAS', valor: 0 },
-        { label: 'OP. EXONERADAS', valor: 0 },
-        { label: 'OP. GRATUITAS', valor: 0 },
-        { label: 'OTROS CARGOS', valor: 0 },
-        { label: 'OTROS TRIBUTOS', valor: 0 },
-        { label: 'DESCUENTO', valor: venta.descuento || 0 },
-        { label: 'IGV 18%', valor: igv },
-    ];
+    const descargarPdf = async () => {
+        const hoja = hojaRef.current;
+        if (!hoja) return;
+        setDescargando(true);
+        try {
+            const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+                import('html2canvas-pro'),
+                import('jspdf'),
+            ]);
+            const canvas = await html2canvas(hoja, {
+                scale: 2,
+                backgroundColor: '#ffffff',
+                useCORS: true,
+                scrollX: 0,
+                scrollY: 0,
+                onclone: (doc) => {
+                    const el = doc.getElementById('seccion-imprimible');
+                    if (el) el.style.transform = 'none';
+                },
+            });
+            const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297);
+            pdf.save(`${numeroDoc}.pdf`);
+        } finally {
+            setDescargando(false);
+        }
+    };
 
-    const colBorde = 'border-r border-black';
+    const etiqueta = 'text-[8px] uppercase tracking-[0.12em] text-gray-400 font-medium';
 
     return (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex flex-col overflow-hidden">
@@ -156,7 +171,7 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
                         width: 210mm !important;
                         height: 297mm !important;
                         margin: 0 !important;
-                        padding: 10mm 12mm !important;
+                        padding: 12mm 14mm !important;
                         box-shadow: none !important;
                         transform: none !important;
                         background: white !important;
@@ -176,7 +191,7 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
                         <FaFileInvoice className="text-lg" />
                     </div>
                     <div>
-                        <h3 className="text-sm font-bold text-white">Vista Previa de Comprobante</h3>
+                        <h3 className="text-sm font-bold text-white">Vista previa de comprobante</h3>
                         <p className="text-[11px] text-slate-400 font-mono">{numeroDoc} · {venta.cliente_nombre || 'Cliente General'}</p>
                     </div>
                 </div>
@@ -184,8 +199,11 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
                     <Button onClick={onCerrar} icono={<FaTimes className="text-xs" />}>
                         Cerrar
                     </Button>
+                    <Button onClick={descargarPdf} disabled={descargando} icono={<FaDownload className="text-xs" />}>
+                        {descargando ? 'Generando…' : 'Descargar PDF'}
+                    </Button>
                     <Button variante="primario" onClick={() => window.print()} icono={<FaPrint className="text-xs" />}>
-                        Imprimir Comprobante
+                        Imprimir
                     </Button>
                 </div>
             </div>
@@ -209,161 +227,135 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
                             height: '1123px',
                             fontFamily: 'Arial, Helvetica, sans-serif',
                         }}
-                        className="bg-white text-black p-8 shadow-2xl flex flex-col text-[10px] leading-snug"
+                        className="bg-white text-gray-900 px-12 py-11 shadow-2xl flex flex-col text-[10px] leading-snug"
                     >
                         {/* ENCABEZADO */}
-                        <div className="flex items-stretch justify-between gap-6">
-                            <div className="flex-1 space-y-1">
+                        <div className="flex items-start justify-between gap-8">
+                            <div className="max-w-[400px]">
                                 {EMPRESA.logo && (
-                                    <img src={EMPRESA.logo} alt="Logo" className="h-12 object-contain mb-1" />
+                                    <img src={EMPRESA.logo} alt="Logo" className="h-10 object-contain mb-2" />
                                 )}
-                                <h1 className="text-[15px] font-black uppercase leading-tight">{EMPRESA.nombre}</h1>
-                                <p className="text-[9px]">{EMPRESA.direccion}</p>
-                                <p className="text-[9px]">
-                                    <strong>Telf:</strong> {EMPRESA.telefonos}
-                                </p>
-                                <p className="text-[8px] uppercase pt-1">{EMPRESA.giro}</p>
+                                <h1 className="text-[16px] font-bold tracking-tight text-gray-900">{EMPRESA.nombre}</h1>
+                                <p className="text-[9px] text-gray-500 mt-1.5">RUC {EMPRESA.ruc}</p>
+                                <p className="text-[9px] text-gray-500">{EMPRESA.direccion}</p>
+                                <p className="text-[9px] text-gray-500">Telf. {EMPRESA.telefonos}</p>
                             </div>
 
-                            <div className="w-[260px] border border-black flex flex-col items-center justify-center text-center py-4 px-3 gap-3 shrink-0">
-                                <p className="text-[15px] font-bold">R.U.C. N° {EMPRESA.ruc}</p>
-                                <p className="text-[15px] font-bold uppercase">{tituloDoc}</p>
-                                <p className="text-[16px] font-bold text-red-600">N° {numeroDoc}</p>
+                            <div className="text-right shrink-0">
+                                <p className={etiqueta}>{tituloDoc}</p>
+                                <p className="text-[22px] font-semibold tracking-tight text-gray-900 mt-1">{numeroDoc}</p>
+                                <p className="text-[9px] text-gray-500 mt-1">Emitido el {fecha}</p>
                             </div>
                         </div>
 
-                        {/* DATOS CLIENTE */}
-                        <div className="border border-black mt-3 grid grid-cols-12 p-2 gap-x-4 gap-y-0.5">
-                            <div className="col-span-7 space-y-0.5">
-                                <div className="flex">
-                                    <span className="font-bold w-24 shrink-0">SR. (ES)</span>
-                                    <span className="uppercase">: {venta.cliente_nombre || 'Cliente General'}</span>
-                                </div>
+                        <p className="text-[8px] text-gray-400 mt-4 max-w-[520px]">{EMPRESA.giro}</p>
+
+                        <div className="border-t border-gray-200 my-6" />
+
+                        {/* CLIENTE */}
+                        <div className="grid grid-cols-2 gap-x-10 gap-y-3">
+                            <div>
+                                <p className={etiqueta}>Cliente</p>
+                                <p className="text-[11px] font-semibold uppercase mt-0.5">{venta.cliente_nombre || 'Cliente General'}</p>
                                 {docCliente && (
-                                    <div className="flex">
-                                        <span className="font-bold w-24 shrink-0">
-                                            {docCliente.length === 11 ? 'R.U.C.' : 'D.N.I.'}
-                                        </span>
-                                        <span>: {docCliente}</span>
-                                    </div>
+                                    <p className="text-[9px] text-gray-500 mt-0.5">
+                                        {docCliente.length === 11 ? 'RUC' : 'DNI'} {docCliente}
+                                    </p>
                                 )}
                                 {venta.cliente_direccion && (
-                                    <div className="flex">
-                                        <span className="font-bold w-24 shrink-0">DIRECCIÓN</span>
-                                        <span className="uppercase">: {venta.cliente_direccion}</span>
-                                    </div>
+                                    <p className="text-[9px] text-gray-500 uppercase">{venta.cliente_direccion}</p>
                                 )}
                             </div>
-                            <div className="col-span-5 space-y-0.5">
-                                <div className="flex">
-                                    <span className="font-bold w-28 shrink-0">FECHA EMISIÓN</span>
-                                    <span>: {fecha}</span>
-                                </div>
-                                <div className="flex">
-                                    <span className="font-bold w-28 shrink-0">CONDICIÓN DE PAGO</span>
-                                    <span>: CONTADO {metodo}</span>
-                                </div>
-                                <div className="flex">
-                                    <span className="font-bold w-28 shrink-0">MONEDA</span>
-                                    <span>: SOLES</span>
-                                </div>
+                            <div className="text-right">
+                                <p className={etiqueta}>Pago</p>
+                                <p className="text-[11px] font-semibold mt-0.5">Contado · {metodo}</p>
+                                <p className="text-[9px] text-gray-500 mt-0.5">Moneda: Soles</p>
                             </div>
                         </div>
 
-                        {/* TABLA ITEMS */}
-                        <div className="flex-1 flex flex-col mt-3 min-h-0">
-                            <table className="w-full h-full border border-black border-collapse text-[10px]">
+                        {/* ITEMS */}
+                        <div className="flex-1 mt-7 min-h-0">
+                            <table className="w-full border-collapse">
                                 <thead>
-                                    <tr className="border-b border-black font-bold">
-                                        <th className={`py-2 px-1 text-center w-20 ${colBorde}`}>CÓDIGO</th>
-                                        <th className={`py-2 px-1 text-center w-16 ${colBorde}`}>CANTIDAD</th>
-                                        <th className={`py-2 px-1 text-center ${colBorde}`}>DESCRIPCIÓN</th>
-                                        <th className={`py-2 px-1 text-center w-12 ${colBorde}`}>UM</th>
-                                        <th className={`py-2 px-1 text-center w-20 ${colBorde}`}>VALOR UNITARIO</th>
-                                        <th className={`py-2 px-1 text-center w-20 ${colBorde}`}>PRECIO UNITARIO</th>
-                                        <th className="py-2 px-1 text-center w-24">VALOR VENTA TOTAL</th>
+                                    <tr className="border-b border-gray-300">
+                                        <th className={`${etiqueta} py-2 text-left`}>Descripción</th>
+                                        <th className={`${etiqueta} py-2 text-center w-14`}>UM</th>
+                                        <th className={`${etiqueta} py-2 text-right w-16`}>Cant.</th>
+                                        <th className={`${etiqueta} py-2 text-right w-24`}>P. unit.</th>
+                                        <th className={`${etiqueta} py-2 text-right w-28`}>Importe</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {venta.items && venta.items.length > 0 ? (
                                         venta.items.map((it, idx) => {
                                             const extra = it as unknown as ItemExtra;
-                                            const valorUnit = it.precio_venta / (1 + IGV_TASA);
-                                            const valorTotal = (it.cantidad * it.precio_venta) / (1 + IGV_TASA);
+                                            const codigo = it.sku_producto || extra.codigo;
                                             return (
-                                                <tr key={idx} className="align-top">
-                                                    <td className={`py-1 px-1 text-left ${colBorde}`}>{extra.codigo || String(idx + 1).padStart(3, '0')}</td>
-                                                    <td className={`py-1 px-1 text-right ${colBorde}`}>{num(it.cantidad)}</td>
-                                                    <td className={`py-1 px-1 text-left ${colBorde}`}>{it.descripcion}</td>
-                                                    <td className={`py-1 px-1 text-center ${colBorde}`}>{codigoUnidad(extra.unidad_medida)}</td>
-                                                    <td className={`py-1 px-1 text-right ${colBorde}`}>{num(valorUnit)}</td>
-                                                    <td className={`py-1 px-1 text-right ${colBorde}`}>{num(it.precio_venta)}</td>
-                                                    <td className="py-1 px-1 text-right">{num(valorTotal)}</td>
+                                                <tr key={idx} className="border-b border-gray-100 align-top">
+                                                    <td className="py-2.5 pr-3">
+                                                        <p className="text-[10px] font-medium text-gray-900">{it.descripcion}</p>
+                                                        {codigo && <p className="text-[8px] text-gray-400 mt-0.5">{codigo}</p>}
+                                                    </td>
+                                                    <td className="py-2.5 text-center text-gray-500">{codigoUnidad(extra.unidad_medida)}</td>
+                                                    <td className="py-2.5 text-right tabular-nums">{num(it.cantidad)}</td>
+                                                    <td className="py-2.5 text-right tabular-nums">{num(it.precio_venta)}</td>
+                                                    <td className="py-2.5 text-right tabular-nums font-medium">{num(it.cantidad * it.precio_venta)}</td>
                                                 </tr>
                                             );
                                         })
                                     ) : (
                                         <tr>
-                                            <td colSpan={7} className="py-6 text-center italic">Sin ítems especificados</td>
+                                            <td colSpan={5} className="py-8 text-center italic text-gray-400">Sin ítems especificados</td>
                                         </tr>
                                     )}
-                                    {/* fila de relleno: estira las columnas hasta el final */}
-                                    <tr style={{ height: '100%' }}>
-                                        <td className={colBorde} />
-                                        <td className={colBorde} />
-                                        <td className={colBorde} />
-                                        <td className={colBorde} />
-                                        <td className={colBorde} />
-                                        <td className={colBorde} />
-                                        <td />
-                                    </tr>
                                 </tbody>
                             </table>
                         </div>
 
                         {/* TOTALES */}
-                        <div className="flex border-x border-b border-black">
-                            <div className="flex-1 flex flex-col justify-end">
-                                <div className="border-t border-black p-1.5 mt-auto">
-                                    <span className="font-bold">SON: </span>
-                                    {totalEnLetras(total)}
-                                </div>
+                        <div className="flex items-end justify-between gap-8 pt-5 border-t border-gray-200">
+                            <div className="max-w-[360px]">
+                                <p className={etiqueta}>Son</p>
+                                <p className="text-[9px] text-gray-700 mt-0.5">{totalEnLetras(total)}</p>
                             </div>
-                            <div className="w-[270px] border-l border-black text-[10px]">
-                                {filasTotales.map((f) => (
-                                    <div key={f.label} className="flex border-b border-black last:border-b-0">
-                                        <span className="flex-1 text-right pr-2 py-0.5">{f.label}</span>
-                                        <span className="w-8 border-l border-black pl-1 py-0.5">S/</span>
-                                        <span className="w-20 text-right pr-1 py-0.5">{num(f.valor)}</span>
+
+                            <div className="w-[240px] space-y-1.5">
+                                <div className="flex justify-between text-gray-500">
+                                    <span>Op. gravada</span>
+                                    <span className="tabular-nums">S/ {num(opGravadas)}</span>
+                                </div>
+                                <div className="flex justify-between text-gray-500">
+                                    <span>IGV 18%</span>
+                                    <span className="tabular-nums">S/ {num(igv)}</span>
+                                </div>
+                                {descuento > 0 && (
+                                    <div className="flex justify-between text-gray-500">
+                                        <span>Descuento</span>
+                                        <span className="tabular-nums">- S/ {num(descuento)}</span>
                                     </div>
-                                ))}
-                                <div className="flex border-t border-black font-bold">
-                                    <span className="flex-1 text-right pr-2 py-0.5">TOTAL</span>
-                                    <span className="w-8 border-l border-black pl-1 py-0.5">S/</span>
-                                    <span className="w-20 text-right pr-1 py-0.5">{num(total)}</span>
+                                )}
+                                <div className="flex justify-between items-baseline border-t border-gray-900 pt-2 mt-2">
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider">Total</span>
+                                    <span className="text-[16px] font-bold tabular-nums">S/ {num(total)}</span>
                                 </div>
                             </div>
                         </div>
 
                         {/* PIE */}
-                        <div className="mt-2 space-y-1 text-[9px]">
+                        <div className="mt-7 text-[8px] text-gray-400 space-y-1">
                             {venta.monto_pagado !== undefined && venta.monto_pagado !== null && (
-                                <p>
-                                    Monto Entregado: S/ {num(venta.monto_pagado)} · Vuelto: S/ {num(venta.vuelto || 0)}
-                                </p>
+                                <p>Monto entregado: S/ {num(venta.monto_pagado)} · Vuelto: S/ {num(venta.vuelto || 0)}</p>
                             )}
                             {venta.observaciones && (
-                                <p>
-                                    <strong>Observaciones:</strong> {venta.observaciones}
-                                </p>
+                                <p><span className="font-semibold text-gray-500">Observaciones:</span> {venta.observaciones}</p>
                             )}
                             <div className="pt-1">
                                 {EMPRESA.terminos.map((t, idx) => (
                                     <p key={idx}>{t}</p>
                                 ))}
                             </div>
-                            <p className="pt-1 text-[8px]">
-                                Documento no valido ante la SUNAT, esto es una representación impresa de la {tituloDoc} generada en el sistema interno.
+                            <p className="pt-2">
+                                Documento no válido ante la SUNAT. Representación impresa de la {tituloDoc.toLowerCase()} generada en el sistema interno.
                             </p>
                         </div>
                     </div>
