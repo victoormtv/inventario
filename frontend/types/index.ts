@@ -228,6 +228,7 @@ export interface ResultadoVenta {
     cliente_nombre: string;
     cliente_documento: string | null;
     cliente_direccion: string | null;
+    cliente_email: string | null;
     fecha: string;
     subtotal: number;
     descuento?: number;

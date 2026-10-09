@@ -1,4 +1,10 @@
 """Registro de ventas: boletas y facturas (fake por ahora, para imprimir localmente)."""
+import html
+import os
+import re
+import smtplib
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +21,7 @@ IGV_TASA = 0.18
 TALLAS_NEUTRAS = {"", "-", "unico", "único", "unica", "única", "unidad"}
 # Roles que pueden editar / eliminar ventas
 ROLES_EDICION = {"admin"}
+LIMA = timezone(timedelta(hours=-5))
 
 
 class ItemVentaIn(BaseModel):
@@ -52,6 +59,10 @@ class VentaEdit(BaseModel):
     observaciones: str | None = None
 
 
+class EnviarCorreoIn(BaseModel):
+    email: str = Field(max_length=200)
+
+
 def _siguiente_correlativo(db, serie: str) -> int:
     db.execute("INSERT OR IGNORE INTO correlativos (serie, ultimo) VALUES (?, 0)", (serie,))
     db.execute("UPDATE correlativos SET ultimo = ultimo + 1 WHERE serie = ?", (serie,))
@@ -69,9 +80,20 @@ def _etiqueta(v) -> str:
     return f"{serie}-{int(v['numero'] or v['id']):08d}"
 
 
+def _fecha_lima(f) -> str:
+    try:
+        d = datetime.fromisoformat(str(f).replace(" ", "T").replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d.astimezone(LIMA).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return str(f)
+
+
 def _detalle_venta(db, id_venta: int) -> dict:
     v = db.execute(
-        """SELECT ve.*, t.nombre AS cliente_nombre, t.documento AS cliente_documento, t.direccion AS cliente_direccion
+        """SELECT ve.*, t.nombre AS cliente_nombre, t.documento AS cliente_documento,
+                  t.direccion AS cliente_direccion, t.email AS cliente_email
            FROM ventas ve LEFT JOIN terceros t ON t.id = ve.id_cliente
            WHERE ve.id = ?""",
         (id_venta,),
@@ -102,6 +124,51 @@ def _descripcion_y_costo(db, id_variante: int, nombre: str):
     if var and (var["color"] or "").strip():
         partes.append(var["color"].strip())
     return " ".join(partes), costo
+
+
+def _html_comprobante(v: dict) -> str:
+    etiqueta = _etiqueta(v)
+    tipo = "FACTURA ELECTRÓNICA" if v["tipo_comprobante"] == "factura" else "BOLETA DE VENTA ELECTRÓNICA"
+    celda = "padding:8px 6px;border-bottom:1px solid #eee"
+    filas = "".join(
+        f"<tr><td style='{celda}'>{html.escape(i['descripcion'] or '')}</td>"
+        f"<td style='{celda};text-align:center'>{i['cantidad']}</td>"
+        f"<td style='{celda};text-align:right'>S/ {i['precio_venta']:.2f}</td>"
+        f"<td style='{celda};text-align:right'>S/ {i['cantidad'] * i['precio_venta']:.2f}</td></tr>"
+        for i in v["items"]
+    )
+    total = v["total"] or 0
+    gravada = total / (1 + IGV_TASA)
+    igv = total - gravada
+    desc = (
+        f"<p style='margin:2px 0'>Descuento: -S/ {v['descuento']:.2f}</p>" if v.get("descuento") else ""
+    )
+    return f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#1e293b">
+      <h3 style="margin:0">INVERSIONES NATHAN S.R.L</h3>
+      <p style="margin:2px 0;font-size:12px;color:#64748b">RUC 20610124616 · Telf. 950 549 676</p>
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0">
+      <p style="margin:0;font-size:11px;color:#64748b">{tipo}</p>
+      <p style="margin:2px 0;font-size:22px;font-weight:bold">{etiqueta}</p>
+      <p style="margin:2px 0">Fecha: {_fecha_lima(v['fecha'])}</p>
+      <p style="margin:2px 0">Cliente: {html.escape(v.get('cliente_nombre') or 'Cliente General')}</p>
+      <p style="margin:2px 0">Documento: {html.escape(v.get('cliente_documento') or '-')}</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px">
+        <thead><tr style="background:#f1f5f9">
+          <th style="padding:8px 6px;text-align:left">Descripción</th>
+          <th style="padding:8px 6px">Cant.</th>
+          <th style="padding:8px 6px;text-align:right">P. Unit.</th>
+          <th style="padding:8px 6px;text-align:right">Importe</th>
+        </tr></thead><tbody>{filas}</tbody>
+      </table>
+      <div style="text-align:right;margin-top:12px;font-size:14px">
+        <p style="margin:2px 0">Op. gravada: S/ {gravada:.2f}</p>
+        <p style="margin:2px 0">IGV 18%: S/ {igv:.2f}</p>
+        {desc}
+        <p style="margin:6px 0;font-size:18px;font-weight:bold">TOTAL: S/ {total:.2f}</p>
+      </div>
+      <p style="margin-top:24px;font-size:12px;color:#64748b">¡Gracias por su preferencia!</p>
+    </div>"""
 
 
 @router.post("", status_code=201)
@@ -208,9 +275,8 @@ def editar_venta(id_venta: int, e: VentaEdit, db=Depends(get_db), usuario: str =
         nombres = {}
         for vid in set(viejos) | set(nuevos):
             delta = (nuevos[vid].cantidad if vid in nuevos else 0) - (viejos[vid]["cantidad"] if vid in viejos else 0)
-            ref = f"Edición {etiqueta}"
             if delta < 0:
-                aplicar_movimiento(db, vid, "ENTRADA", -delta, ref, usuario)
+                aplicar_movimiento(db, vid, "ENTRADA", -delta, f"Edición {etiqueta}", usuario)
         for vid in set(viejos) | set(nuevos):
             delta = (nuevos[vid].cantidad if vid in nuevos else 0) - (viejos[vid]["cantidad"] if vid in viejos else 0)
             if delta > 0:
@@ -282,6 +348,46 @@ def eliminar_venta(id_venta: int, db=Depends(get_db), usuario: str = Depends(usu
     return {"id": id_venta}
 
 
+@router.post("/{id_venta}/enviar-correo")
+def enviar_comprobante(id_venta: int, d: EnviarCorreoIn, db=Depends(get_db), usuario: str = Depends(usuario_actual)):
+    email = d.email.strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(400, "Correo inválido.")
+
+    host = os.environ.get("SMTP_HOST")
+    user = os.environ.get("SMTP_USER")
+    clave = os.environ.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASS")
+    if not (host and user and clave):
+        raise HTTPException(400, "El correo no está configurado (SMTP_HOST, SMTP_USER, SMTP_PASSWORD).")
+    puerto = int(os.environ.get("SMTP_PORT", "587"))
+
+    v = _detalle_venta(db, id_venta)
+    etiqueta = _etiqueta(v)
+
+    msg = EmailMessage()
+    msg["Subject"] = f"Comprobante {etiqueta} - INVERSIONES NATHAN S.R.L"
+    msg["From"] = os.environ.get("SMTP_FROM", user)
+    msg["To"] = email
+    msg.set_content(f"Comprobante {etiqueta} por S/ {v['total']:.2f}. Abre este correo en un cliente que soporte HTML.")
+    msg.add_alternative(_html_comprobante(v), subtype="html")
+
+    try:
+        if puerto == 465:
+            with smtplib.SMTP_SSL(host, puerto, timeout=15) as s:
+                s.login(user, clave)
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP(host, puerto, timeout=15) as s:
+                s.starttls()
+                s.login(user, clave)
+                s.send_message(msg)
+    except Exception as ex:
+        raise HTTPException(502, f"No se pudo enviar el correo: {ex}")
+
+    auditar(db, usuario, f"Envió {etiqueta} a {email}")
+    return {"enviado": True}
+
+
 @router.get("/{id_venta}")
 def obtener_venta(id_venta: int, db=Depends(get_db)):
     return _detalle_venta(db, id_venta)
@@ -292,7 +398,7 @@ def listar_ventas(page: int = 1, limit: int = 20, db=Depends(get_db)):
     total = db.execute("SELECT COUNT(*) FROM ventas").fetchone()[0]
     filas = db.execute(
         """SELECT ve.id, ve.tipo_comprobante, ve.serie, ve.numero, ve.fecha, ve.subtotal, ve.descuento, ve.total, ve.ganancia_total, ve.metodo_pago, ve.monto_pagado, ve.vuelto, ve.observaciones, ve.estado, ve.usuario,
-                  t.nombre AS cliente_nombre
+                  t.nombre AS cliente_nombre, t.email AS cliente_email
            FROM ventas ve LEFT JOIN terceros t ON t.id = ve.id_cliente
            ORDER BY ve.fecha DESC LIMIT ? OFFSET ?""",
         (limit, (page - 1) * limit),

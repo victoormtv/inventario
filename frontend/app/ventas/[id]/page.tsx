@@ -8,22 +8,22 @@ import {
     FaBuilding,
     FaCoins,
     FaDollarSign,
-    FaFileInvoice,
-    FaIdCard,
+    FaEnvelope,
     FaPrint,
-    FaReceipt,
     FaUser,
 } from 'react-icons/fa';
 import { useApi } from '@/hooks/useApi';
 import { moneda } from '@/lib/format';
 import type { ResultadoVenta } from '@/types';
 import ComprobanteImprimible from '@/components/ventas/ComprobanteImprimible';
+import EnviarCorreoModal from '@/components/ventas/EnviarCorreoModal';
 import { EmptyState, ErrorState, TablaSkeleton } from '@/components/ui/States';
 
 export default function DetalleVentaPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
     const router = useRouter();
     const [mostrarComprobante, setMostrarComprobante] = useState(false);
+    const [mostrarCorreo, setMostrarCorreo] = useState(false);
 
     const { data: venta, loading, error, refetch } = useApi<ResultadoVenta>(`/api/ventas/${id}`);
 
@@ -48,7 +48,7 @@ export default function DetalleVentaPage({ params }: { params: Promise<{ id: str
     }
 
     const esBoleta = venta.tipo_comprobante === 'boleta';
-    const numeroFormateado = `${venta.serie || (esBoleta ? 'B001' : 'F001')}-${String(venta.numero || 0).padStart(6, '0')}`;
+    const numeroFormateado = `${venta.serie || (esBoleta ? 'B001' : 'F001')}-${String(venta.numero || venta.id).padStart(8, '0')}`;
     const esEmpresa = venta.cliente_documento?.length === 11;
 
     return (
@@ -89,6 +89,13 @@ export default function DetalleVentaPage({ params }: { params: Promise<{ id: str
 
                     <div className="flex items-center gap-2">
                         <button
+                            onClick={() => setMostrarCorreo(true)}
+                            className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all cursor-pointer"
+                        >
+                            <FaEnvelope className="text-xs" />
+                            Enviar por correo
+                        </button>
+                        <button
                             onClick={() => setMostrarComprobante(true)}
                             className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-all cursor-pointer shadow-lg shadow-indigo-600/20"
                         >
@@ -125,6 +132,12 @@ export default function DetalleVentaPage({ params }: { params: Promise<{ id: str
                                     <span className="font-bold font-mono text-slate-800 bg-slate-100 px-2 py-0.5 rounded">
                                         {venta.cliente_documento}
                                     </span>
+                                </div>
+                            )}
+                            {venta.cliente_email && (
+                                <div className="flex justify-between py-1.5 border-b border-slate-100">
+                                    <span className="font-semibold text-slate-500">Correo:</span>
+                                    <span className="font-medium text-slate-700">{venta.cliente_email}</span>
                                 </div>
                             )}
                             {venta.cliente_direccion && (
@@ -260,6 +273,9 @@ export default function DetalleVentaPage({ params }: { params: Promise<{ id: str
 
             {mostrarComprobante && (
                 <ComprobanteImprimible venta={venta} onCerrar={() => setMostrarComprobante(false)} />
+            )}
+            {mostrarCorreo && (
+                <EnviarCorreoModal venta={venta} onCerrar={() => setMostrarCorreo(false)} />
             )}
         </div>
     );

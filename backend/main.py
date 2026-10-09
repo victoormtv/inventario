@@ -62,6 +62,7 @@ def migrar_bd():
         _agregar_columna(conn, "ventas", "serie", "TEXT")
         _agregar_columna(conn, "ventas", "numero", "INTEGER")
         _agregar_columna(conn, "ventas", "ganancia_total", "REAL")
+        _agregar_columna(conn, "ventas", "id_vendedor", "INTEGER")
         conn.execute(
             """UPDATE variantes SET
                  precio_costo = (SELECT precio_costo FROM productos WHERE sku = variantes.sku_producto),

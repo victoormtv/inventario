@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { FaPrint, FaTimes, FaFileInvoice, FaDownload } from 'react-icons/fa';
+import { FaPrint, FaTimes, FaFileInvoice, FaDownload, FaEnvelope } from 'react-icons/fa';
 import type { ResultadoVenta } from '@/types';
 import Button from '@/components/ui/Button';
+import EnviarCorreoModal from './EnviarCorreoModal';
 
 const EMPRESA = {
     nombre: 'INVERSIONES NATHAN S.R.L',
@@ -80,7 +81,7 @@ type ItemExtra = { unidad_medida?: string; codigo?: string };
 export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
     const esFactura = venta.tipo_comprobante === 'factura';
     const tituloDoc = esFactura ? 'Factura electrónica' : 'Boleta de venta electrónica';
-    const numeroDoc = `${venta.serie || (esFactura ? 'F001' : 'B001')}-${String(venta.numero || 1).padStart(8, '0')}`;
+    const numeroDoc = `${venta.serie || (esFactura ? 'F001' : 'B001')}-${String(venta.numero || venta.id || 1).padStart(8, '0')}`;
     const fecha = venta.fecha
         ? new Date(venta.fecha).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
         : new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -96,6 +97,7 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
     const hojaRef = useRef<HTMLDivElement>(null);
     const [escala, setEscala] = useState(1);
     const [descargando, setDescargando] = useState(false);
+    const [mostrarCorreo, setMostrarCorreo] = useState(false);
 
     useEffect(() => {
         const calcularEscala = () => {
@@ -198,6 +200,9 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
                 <div className="flex items-center gap-2.5">
                     <Button onClick={onCerrar} icono={<FaTimes className="text-xs" />}>
                         Cerrar
+                    </Button>
+                    <Button onClick={() => setMostrarCorreo(true)} icono={<FaEnvelope className="text-xs" />}>
+                        Enviar correo
                     </Button>
                     <Button onClick={descargarPdf} disabled={descargando} icono={<FaDownload className="text-xs" />}>
                         {descargando ? 'Generando…' : 'Descargar PDF'}
@@ -361,6 +366,10 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
                     </div>
                 </div>
             </div>
+
+            {mostrarCorreo && (
+                <EnviarCorreoModal venta={venta} onCerrar={() => setMostrarCorreo(false)} />
+            )}
         </div>
     );
 }
