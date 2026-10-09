@@ -4,6 +4,22 @@
 
 @custom-variant dark (&:is(.dark *));
 
+
+/* ───────────── Paleta de marca (reemplaza indigo-* de Tailwind) ───────────── */
+@theme {
+  --color-indigo-50: #fff8ee;
+  --color-indigo-100: #ffefd6;
+  --color-indigo-200: #ffd792;
+  --color-indigo-300: #ffae6a;
+  --color-indigo-400: #ff8243;
+  --color-indigo-500: #e26a2c;
+  --color-indigo-600: #c65314;
+  --color-indigo-700: #a64410;
+  --color-indigo-800: #84360d;
+  --color-indigo-900: #662a0b;
+  --color-indigo-950: #3d1806;
+}
+
 /* ───────────── Tokens ───────────── */
 :root {
   /* Superficies */
@@ -18,13 +34,13 @@
   --ink-3: #7a8a9a;
 
   /* Marca */
-  --brand: #4f46e5;
-  --brand-strong: #4338ca;
-  --brand-tint: #eef2ff;
+  --brand: #c65314;
+  --brand-strong: #a64410;
+  --brand-tint: #fff3e3;
 
   /* Estados */
-  --warn: #c2410c;
-  --warn-tint: #fdeee3;
+  --warn: #a16207;
+  --warn-tint: #fdf3d7;
   --danger: #b91c1c;
   --danger-tint: #fce8e8;
   --ok: #15803d;
@@ -187,7 +203,7 @@ body {
 .nav-link[aria-current='page'] {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
-  box-shadow: inset 3px 0 0 #818cf8;
+  box-shadow: inset 3px 0 0 #ff8243;
 }
 
 .nav-link__icon {
@@ -198,7 +214,7 @@ body {
 }
 
 .nav-link[aria-current='page'] .nav-link__icon {
-  color: #818cf8;
+  color: #ff8243;
 }
 
 .sidebar__foot {
@@ -1257,7 +1273,7 @@ body {
   font-weight: 700;
   text-align: center;
   color: #fff;
-  background: #e2703a;
+  background: #e26a2c;
   border-radius: 999px;
 }
 
@@ -1331,8 +1347,8 @@ body {
   justify-content: space-between;
   gap: 40px;
   background:
-    radial-gradient(760px 460px at 0% 0%, rgba(63, 208, 199, 0.22), transparent 60%),
-    radial-gradient(620px 460px at 100% 100%, rgba(11, 122, 117, 0.4), transparent 60%),
+    radial-gradient(760px 460px at 0% 0%, rgba(255, 130, 67, 0.22), transparent 60%),
+    radial-gradient(620px 460px at 100% 100%, rgba(198, 83, 20, 0.4), transparent 60%),
     var(--side);
 }
 
@@ -1398,8 +1414,8 @@ body {
   display: grid;
   place-items: center;
   font-size: 10px;
-  color: #3fd0c7;
-  background: rgba(63, 208, 199, 0.14);
+  color: #ffae6a;
+  background: rgba(255, 174, 106, 0.14);
   flex-shrink: 0;
 }
 
@@ -2127,7 +2143,7 @@ body {
   --chart-5: oklch(0.269 0 0);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary: oklch(0.65 0.18 50);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
@@ -2167,12 +2183,12 @@ body {
   --ink-3: #94a3b8;
 
   /* Colores de Marca y Estados adaptados */
-  --brand: #6366f1;
-  --brand-strong: #818cf8;
-  --brand-tint: rgba(99, 102, 241, 0.15);
+  --brand: #e26a2c;
+  --brand-strong: #ff8243;
+  --brand-tint: rgba(255, 130, 67, 0.15);
 
-  --warn: #fb923c;
-  --warn-tint: rgba(251, 146, 60, 0.15);
+  --warn: #fbbf24;
+  --warn-tint: rgba(251, 191, 36, 0.15);
   --danger: #f87171;
   --danger-tint: rgba(248, 113, 113, 0.15);
   --ok: #4ade80;
@@ -2235,4 +2251,10 @@ body {
 .dark .dropzone {
   background: #1e293b;
   border-color: #334155;
+}
+
+[data-slot="select-content"],
+[data-slot="select-positioner"],
+[data-radix-popper-content-wrapper] {
+  z-index: 200 !important;
 }
