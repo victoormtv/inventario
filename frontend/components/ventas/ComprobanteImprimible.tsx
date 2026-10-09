@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { FaPrint, FaTimes, FaFileInvoice, FaEnvelope } from 'react-icons/fa';
+import { FaPrint, FaTimes, FaFileInvoice, FaEnvelope, FaDownload } from 'react-icons/fa';
 import type { ResultadoVenta } from '@/types';
 import Button from '@/components/ui/Button';
 import EnviarCorreoModal from './EnviarCorreoModal';
@@ -97,6 +97,7 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
     const [escala, setEscala] = useState(1);
     const [, setAltoBarra] = useState(64);
     const [mostrarCorreo, setMostrarCorreo] = useState(false);
+    const [descargando, setDescargando] = useState(false);
 
     useEffect(() => {
         const calcularEscala = () => {
@@ -116,6 +117,34 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
         window.addEventListener('resize', calcularEscala);
         return () => window.removeEventListener('resize', calcularEscala);
     }, [venta]);
+
+    const descargarPdf = async () => {
+        const hoja = hojaRef.current;
+        if (!hoja) return;
+        setDescargando(true);
+        try {
+            const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+                import('html2canvas-pro'),
+                import('jspdf'),
+            ]);
+            const canvas = await html2canvas(hoja, {
+                scale: 2,
+                backgroundColor: '#ffffff',
+                useCORS: true,
+                scrollX: 0,
+                scrollY: 0,
+                onclone: (doc) => {
+                    const el = doc.getElementById('seccion-imprimible');
+                    if (el) el.style.transform = 'none';
+                },
+            });
+            const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297);
+            pdf.save(`${numeroDoc}.pdf`);
+        } finally {
+            setDescargando(false);
+        }
+    };
 
     const filasTotales: { label: string; valor: number; negativo?: boolean }[] = [
         { label: 'OP. GRAVADAS', valor: opGravadas },
@@ -188,6 +217,9 @@ export default function ComprobanteImprimible({ venta, onCerrar }: Props) {
                     </Button>
                     <Button onClick={() => setMostrarCorreo(true)} icono={<FaEnvelope className="text-xs" />}>
                         Enviar correo
+                    </Button>
+                    <Button onClick={descargarPdf} disabled={descargando} icono={<FaDownload className="text-xs" />}>
+                        {descargando ? 'Generando…' : 'Descargar PDF'}
                     </Button>
                     <Button variante="primario" onClick={() => window.print()} icono={<FaPrint className="text-xs" />}>
                         Imprimir Comprobante
